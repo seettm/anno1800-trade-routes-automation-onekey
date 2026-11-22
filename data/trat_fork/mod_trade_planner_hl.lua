@@ -223,6 +223,24 @@ function TPHL_Internal.Ships_Available(L, region)
             end);
 
             if isMoving then
+                -- [v1.12.1] 「空舱却一直在开」基本只有一种解释：船挂在**有站点**的
+                -- 游戏航线上，航线 AI 在驱动它循环跑，调度器永远等不到它停下。
+                -- 本 mod 派单是「装货 → 开过去 → 卸货」，中途货舱一定有货；
+                -- 空舱长距离移动不可能是我们干的。
+                -- 连续 6 轮（约 1 分钟）就报一次，避免刷屏。
+                if not hasCargo then
+                    local driveKey = "trat_fork_ai_drive_" .. tostring(oid);
+                    local n = (tonumber(_G[driveKey]) or 0) + 1;
+                    _G[driveKey] = n;
+                    if n == 6 then
+                        L.logf("[TRAtUI] 船只 %d 连续 %d 轮空舱移动：是航线 AI 在驱动它，不是本 mod 派的单。"
+                                .. "请把该航线的站点删掉只留一个待命岛（或直接在航线界面暂停这条航线），船才会交还调度器。",
+                                oid, n);
+                    end
+                else
+                    _G["trat_fork_ai_drive_" .. tostring(oid)] = 0;
+                end
+
                 stillMoving[oid] = { route_name = route_name };
                 L.logf("trade route automation ship -> stillMoving : oid=%d name=%s route=%s isMoving=%s hasCargo=%s",
                         oid, shipName, tostring(route_name), tostring(isMoving), tostring(hasCargo));

@@ -1280,6 +1280,34 @@ function UI.Status()
     if (fleet.A + fleet.B + fleet.ALL) > 0 then
         say(string.format("舰队 航线A=%d艘 航线B=%d艘 无后缀航线=%d艘 手动接管=%d艘",
                 fleet.A, fleet.B, fleet.ALL, fleet.M));
+
+        -- [v1.12.1] 空舱移动 = 航线 AI 在开，不是本 mod 派的单（我们派单时舱里一定有货）。
+        -- 这是「挂了航线之后反而不搬运」的唯一成因，直接把船数和处置办法一起报出来。
+        local aiDriven = 0;
+        for k in pairs(list) do
+            local oid = tonumber(k);
+            if oid ~= nil then
+                local okMoving, moving = pcall(M.Anno.Ship_IsMoving, oid);
+                local hasCargo = false;
+                local okCargo, cargo = pcall(M.Anno.Ship_Cargo_Get, oid);
+                if okCargo and type(cargo) == "table" then
+                    for _, item in pairs(cargo) do
+                        if type(item) == "table" and (item.Value or 0) > 0 then
+                            hasCargo = true;
+                            break;
+                        end
+                    end
+                end
+                if okMoving and moving and not hasCargo then
+                    aiDriven = aiDriven + 1;
+                end
+            end
+        end
+        if aiDriven > 0 then
+            say(string.format("注意 有 %d 艘船在空舱移动：航线 AI 正在驱动它们。"
+                    .. "请把航线站点删到只剩一个待命岛，或在航线界面暂停这条航线，船才会交还调度器。",
+                    aiDriven));
+        end
     else
         say(string.format("舰队 未检测到搬运航线（在航线界面建一条名为 TRA_%s_A 的航线，把船拖进去即自动接管）",
                 tostring(region)));
