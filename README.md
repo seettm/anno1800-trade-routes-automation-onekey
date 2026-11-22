@@ -111,6 +111,28 @@ C:\Users\<用户名>\Documents\Anno 1800\log\TRAtUI_status.txt
 
 ---
 
+## 打包（仅开发者需要）
+
+```bash
+python tools/build_release.py
+# 产物默认在 mods 目录之外：<Anno 1800>\_build\TradeRoutesAutomation_OneKey_v<版本>.zip
+```
+
+> ⚠️ **绝对不要把 zip 放在 mod 目录里面**（比如 `mods\TradeRoutesAutomation_OneKey\dist\`）。
+>
+> 游戏内置加载器会**递归扫描** mods 目录，把 zip 当成第二个 mod 加载。日志里会多出一条：
+>
+> ```
+> Load TradeRoutesAutomation_OneKey_v1.9.7 (unversioned) from ...\dist\...zip
+> ```
+>
+> 后果：同一个 mod 加载两遍，两份相同 GUID 的 Trigger（1475200100）互相冲突，
+> 主脚本 `_main.lua` 直接不执行 —— 所有热键 `require` 失败，表现就是"按了完全没反应"。
+>
+> 打包脚本已内置保护：输出目录落在 mod 目录内会直接拒绝并报错退出。
+
+---
+
 ## 来源与致谢
 
 - 原作者：[kr3v](https://github.com/kr3v/anno1800-trade-routes-automation) —— 自动化调度核心逻辑
