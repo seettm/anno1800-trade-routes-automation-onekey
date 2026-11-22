@@ -349,6 +349,8 @@ end
 
 function TradePlannerHL.Loop(L, region, interrupt)
     local _yields = 0;
+    -- [v1.11.2] 停泊标记：区域既不在地图上、也没有历史缓存时进入静默等待
+    local parked = false;
     -- [TRAtUI] 入口立即留痕：这条日志是「调度协程到底有没有跑起来」的唯一证据。
     -- 之前整个等待阶段最多 600 帧才写一行，玩家在游戏里等 10 秒什么都看不到。
     L.logf("[TRAtUI] Loop 启动 region=%s", tostring(region));
@@ -363,38 +365,62 @@ function TradePlannerHL.Loop(L, region, interrupt)
         end
 
         local reason = "";
+        local hasGrid = false;
 
-        -- user must cache this manually
-        -- [TRAtUI] 包 pcall：cache.Get 内部要拼路径 + 解 JSON，缓存目录还没准备好
-        -- 或文件损坏时会抛错，而这里在 xpcall 之外，抛一次就整条 region 循环死亡。
-        local okGrid, grid = pcall(MapScannerHL.Region_AllAreas_Get, region);
-        if not okGrid or grid == nil then
-            if not okGrid then
-                L.logf("MapScannerHL.Region_AllAreas_Get failed: %s", tostring(grid));
+        -- ================================================================
+        -- [v1.11.2] 没有我方岛屿的区域自动跳过
+        --
+        -- 原来的实现不管区域在不在，都每 10 帧去问一次地图扫描器，
+        -- 于是「根本没开新世界」的存档会看到 NW 循环永远在刷
+        -- "等待 region=NW yields=… please scan the region NW first"。
+        -- 现在：区域既不是当前地图、也没有历史缓存 → 直接停泊，
+        -- 一个日志都不再打；等玩家真的切进该区域，自动恢复等待扫描。
+        -- ================================================================
+        local currentRegion = nil;
+        pcall(function() currentRegion = Anno.Region_Current(); end);
+        if currentRegion ~= region and not Anno.Region_IsCached(region) then
+            if not parked then
+                parked = true;
+                L.logf("[TRAtUI] 区域 %s 不在当前地图且无缓存：停泊等待（进入该区域后自动接上）", tostring(region));
             end
-            reason = "please scan the region " .. tostring(region) .. " first using the map scanner";
-            goto continue;
+            reason = "region-not-loaded";
+        else
+            if parked then
+                parked = false;
+                L.logf("[TRAtUI] 区域 %s 已回到当前地图，恢复等待缓存", tostring(region));
+            end
+
+            -- user must cache this manually
+            -- [TRAtUI] 包 pcall：cache.Get 内部要拼路径 + 解 JSON，缓存目录还没准备好
+            -- 或文件损坏时会抛错，而这里在 xpcall 之外，抛一次就整条 region 循环死亡。
+            local okGrid, grid = pcall(MapScannerHL.Region_AllAreas_Get, region);
+            if not okGrid or grid == nil then
+                if not okGrid then
+                    L.logf("MapScannerHL.Region_AllAreas_Get failed: %s", tostring(grid));
+                end
+                reason = "please scan the region " .. tostring(region) .. " first using the map scanner";
+            else
+                hasGrid = true;
+                if Anno.Region_CanCache(region) then
+                    Anno.Region_RefreshCache(region);
+                end
+                if Anno.Region_IsCached(region) then
+                    break
+                end
+                reason = "please enter region " .. region .. " to cache it";
+            end
         end
 
-        if Anno.Region_CanCache(region) then
-            Anno.Region_RefreshCache(region);
-        end
-        if Anno.Region_IsCached(region) then
-            break
-        end
-        reason = "please enter region " .. region .. " to cache it";
-
-        :: continue ::
         for _ = 1, 10 do
             coroutine.yield();
         end
         _yields = _yields + 10;
         -- [TRAtUI] 从 600 帧一次改为 120 帧（约 2 秒）一次，并且把分项状态打出来。
         -- 只在前 30 次（约 1 分钟）打，之后降频，避免长时间挂机刷爆日志。
-        if _yields % 120 == 0 and _yields <= 3600 then
+        if reason ~= "region-not-loaded" and _yields % 120 == 0 and _yields <= 3600 then
             L.logf("[TRAtUI] 等待 region=%s yields=%d reason=%s grid=%s cache[%s]",
                     tostring(region), _yields, tostring(reason),
-                    tostring(grid ~= nil), cache_state_str(region));
+                    tostring(hasGrid), cache_state_str(region));
         end
     end
 
@@ -429,6 +455,28 @@ function TradePlannerHL.Loop(L, region, interrupt)
     coroutine.yield();
     coroutine.yield();
     coroutine.yield();
+
+    -- ================================================================
+    -- [v1.11.2] 空区域跳过
+    --
+    -- 缓存建好了，但这座区域既没有我方岛屿、也没有我方船只
+    -- （典型：从没开过新世界 / 只在别人的区域里逛过），就没必要继续
+    -- 初始化改名、清舱、迭代 —— 直接退出这条区域的循环。
+    -- 两个条件同时满足才跳过，避免某个探测 API 失效时把正在干活的区域误杀。
+    -- ================================================================
+    local ownedCnt, shipCnt = 0, 0;
+    local okOwned, owned = pcall(Anno.Areas_Owned_Get, region);
+    if okOwned and type(owned) == "table" then
+        for _ in pairs(owned) do ownedCnt = ownedCnt + 1; end
+    end
+    local okShips, shipsAll = pcall(Anno.Region_Ships_GetAll, region);
+    if okShips and type(shipsAll) == "table" then
+        for _ in pairs(shipsAll) do shipCnt = shipCnt + 1; end
+    end
+    if okOwned and okShips and ownedCnt == 0 and shipCnt == 0 then
+        L.logf("[TRAtUI] 区域 %s 既没有我方岛屿也没有我方船只（岛 0 / 船 0），跳过该区域调度", tostring(region));
+        return;
+    end
 
     local okAvail, availShips, _, withCargo = pcall(TradePlannerHL.__Internal.Ships_Available, L, region);
     if not okAvail then

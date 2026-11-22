@@ -51,6 +51,10 @@ TradePlannerLL.Policy = {
     --   "island" = 按每座岛「实际住着的人口等级」判定（默认，最贴游戏实际情况）
     --   "region" = 退回 v1.11.0 的全区并集（所有住宅需求的货全算，最激进）
     basicNeedScope = "island",
+    -- [v1.11.2] 实时需求：居民消耗表里的「加工链原料」（例如面粉）
+    -- 只在岛上真的建了消耗它的工厂时才算需求。
+    -- false = 退回旧行为（居民表里出现什么就运什么）
+    realtimeDemand = true,
     -- 额外视为「基本需求」的货物 GUID（数据里认不出来的可手工补，全区生效）
     -- 默认空；例如想强制把木材算进去就加 120008
     extraBasicGoods = {},
@@ -197,6 +201,40 @@ local function log_basic_need_by_area(L, region, byArea)
     end
 end
 
+--- 把「哪些货被当作加工链原料（必须有对应工厂才运）」打进日志，每个区域一次。
+---@param L Logger
+---@param region RegionID
+local function log_intermediates(L, region)
+    TradePlannerLL.__Internal.loggedIntermediates = TradePlannerLL.__Internal.loggedIntermediates or {};
+    if TradePlannerLL.__Internal.loggedIntermediates[region] then
+        return;
+    end
+    TradePlannerLL.__Internal.loggedIntermediates[region] = true;
+
+    if TradePlannerLL.Policy.realtimeDemand == false then
+        L.logf("[TRAtUI] 实时需求：已关闭（居民表里出现什么就运什么）");
+        return;
+    end
+    local set = AreasRequest.ProductionInputs_Set(L, region);
+    local names = {};
+    for productID in pairs(set) do
+        local p = AnnoInfo.Product(productID);
+        table.insert(names, p ~= nil and p.Name or tostring(productID));
+    end
+    table.sort(names);
+    if #names == 0 then
+        L.logf("[TRAtUI] 实时需求：本区域没有登记到任何加工建筑，居民需求按原表执行");
+        return;
+    end
+    local shown = math.min(#names, 24);
+    local head = {};
+    for i = 1, shown do
+        head[i] = names[i];
+    end
+    L.logf("[TRAtUI] 加工链原料（岛上没对应工厂就不运）：%d 种 —— %s%s",
+            #names, table.concat(head, ", "), #names > shown and " …" or "");
+end
+
 ---@generic K1, K2, V
 ---@param k123 table<K1, table<K2, V>>
 ---@return table<K2, table<K1, V>>
@@ -309,11 +347,15 @@ end
 ---@param areas table<AreaID, AreaData>
 ---@return TradePlanner.SupplyRequestTable
 function TradePlannerLL.SupplyRequest_Build(L, region, _stockFromInFlight, areas)
-    local areaToProductRequest = AreasRequest.All(L, region);
+    -- [v1.11.2] realtime=true：居民需求里剔除「本区域加工链原料」，
+    -- 原料需求只由真的建了那座厂的岛产生（没面包厂就不运面粉）
+    local areaToProductRequest = AreasRequest.All(L, region,
+            TradePlannerLL.Policy.realtimeDemand ~= false);
     -- [v1.11.1] 生活必需品按「每座岛实际人口」判定；这些货物的最小发运量降到 minTransferBasic
     local basicByArea, basicRegion = build_basic_need_by_area(L, region);
     local basicNeed = { ByArea = basicByArea, Region = basicRegion };
     log_basic_need_by_area(L, region, basicByArea);
+    log_intermediates(L, region);
     local allProducts = {};
     for areaID, products in pairs(areaToProductRequest) do
         for productID, _ in pairs(products) do
@@ -512,11 +554,15 @@ function TradePlannerLL.SupplyRequest_BuildHubs(L, region, _stockFromInFlight, a
         return nil;
     end
 
-    local areaToProductRequest = AreasRequest.All(L, region);
+    -- [v1.11.2] realtime=true：居民需求里剔除「本区域加工链原料」，
+    -- 原料需求只由真的建了那座厂的岛产生（没面包厂就不运面粉）
+    local areaToProductRequest = AreasRequest.All(L, region,
+            TradePlannerLL.Policy.realtimeDemand ~= false);
     -- [v1.11.1] hub 路径同样是「每座岛实际人口」判定必需品
     local basicByArea, basicRegion = build_basic_need_by_area(L, region);
     local basicNeed = { ByArea = basicByArea, Region = basicRegion };
     log_basic_need_by_area(L, region, basicByArea);
+    log_intermediates(L, region);
     local allProducts = {};
     for areaID, products in pairs(areaToProductRequest) do
         for productID, _ in pairs(products) do

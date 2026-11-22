@@ -130,8 +130,102 @@ function AreaRequests.Population_Union(L, region)
     return ret;
 end
 
-function AreaRequests.All(L, region)
+-- [TRAtUI][v1.11.2] 消费类建筑的判定。
+-- 这些建筑消耗货物是为了产出幸福度/服务/邮件，不产出可运输的成品；
+-- 它们的原料不能被当成「加工链原料」，否则礼包工厂会把杜松子酒、
+-- 医院会把药品、洗发剂厂会把肥皂从居民需求里摘掉，结果该运的不运。
+--
+-- 判定两路：
+--   1) 名字里带冒号 —— 数据里所有 DLC 场所类建筑都是 "Bar: Absinthe"、
+--      "Restaurant: Fish and Frites"、"Chemical Plant: Shampoo" 这种格式；
+--   2) 少数没冒号的场所，显式列进黑名单。
+AreaRequests.ConsumerBuildings = {
+    ["Care Package Factory"] = true,
+    ["Cinema"] = true,
+    ["City Hospital"] = true,
+    ["Mezcal Bar"] = true,
+};
+
+--- 这座建筑是否只是「消费场所」而不是加工厂。
+---@param name string
+---@return boolean
+local function is_consumer_building(name)
+    if type(name) ~= "string" then
+        return false;
+    end
+    if AreaRequests.ConsumerBuildings[name] then
+        return true;
+    end
+    return name:find(":", 1, true) ~= nil;
+end
+
+--- 本区域「我方岛屿上真实存在的生产建筑所消耗的原料」集合。
+---
+--- 这是「实时需求」的关键：判定依据不是静态数据表，而是
+--- Anno.Region_ProductionGUIDs —— 也就是玩家**真的建了哪些厂**。
+--- 于是「查西维奇没建面包厂 ⇒ 不需要运面粉」天然成立；
+--- 玩家一旦补上面包厂，面粉立刻进入需求。
+---@param L Logger
+---@param region RegionID
+---@return table<number, boolean>
+function AreaRequests.ProductionInputs_Set(L, region)
+    local ret = {};
+    local ok, q = pcall(Anno.Region_ProductionGUIDs, region);
+    if not ok or type(q) ~= "table" then
+        L.logf("[TRAtUI] ProductionInputs_Set 取工厂列表失败：%s", tostring(q));
+        return ret;
+    end
+    for _, guids in pairs(q) do
+        for _, guid in pairs(guids) do
+            local factory = AnnoInfo.FactoriesInfo[tonumber(guid)];
+            if factory == nil then
+                goto continue;
+            end
+            if is_consumer_building(factory.Name) then
+                goto continue;
+            end
+            for _, input in pairs(factory.Consumption or {}) do
+                ret[tonumber(input.Guid) or input.Guid] = true;
+            end
+            :: continue ::
+        end
+    end
+    return ret;
+end
+
+--- 实时居民需求：居民消耗表 **减去**「本区域加工链原料」。
+---
+--- 为什么必须减：residence_info 里的 Request 是用
+--- GetMaxHappiness/Money/SupplyForGood 探出来的，把「加工链原料」
+--- 也算了进来（农民那一行会出现 Flour）。可原料没人加工就是废料 ——
+--- 岛上没有面包厂，送面粉过去只会堆仓库。
+--- 原料需求改由 AreaRequests.Production 按「岛上有那座厂」精确提供。
+---@param L Logger
+---@param region RegionID
+---@return table<AreaID, table<number, boolean>> population 过滤后的居民需求
+---@return table<number, boolean> intermediates 被剔除的加工链原料
+function AreaRequests.Population_Realtime(L, region)
     local population = AreaRequests.Population(L, region);
+    local intermediates = AreaRequests.ProductionInputs_Set(L, region);
+
+    local ret = {};
+    for areaID, products in pairs(population) do
+        ret[areaID] = {};
+        for productGuid in pairs(products) do
+            local g = tonumber(productGuid) or productGuid;
+            if not intermediates[g] then
+                ret[areaID][productGuid] = true;
+            end
+        end
+    end
+    return ret, intermediates;
+end
+
+function AreaRequests.All(L, region, realtime)
+    local population = AreaRequests.Population(L, region);
+    if realtime then
+        population = AreaRequests.Population_Realtime(L, region);
+    end
     local production = AreaRequests.Production(L, region);
     local construction = AreaRequests.Construction(L, region);
     local tu = AreaRequests.TradeUnionAlikeReplacements(L, region);
