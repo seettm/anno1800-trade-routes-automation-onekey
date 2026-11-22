@@ -71,4 +71,16 @@
       <Text>TRAtUI：查看当前状态（备用键）</Text>
     </Text>
   </ModOp>
+  <ModOp Type="add" Path="/TextExport/Texts">
+    <Text>
+      <GUID>1475200017</GUID>
+      <Text>TRAtUI：探测界面接口</Text>
+    </Text>
+  </ModOp>
+  <ModOp Type="add" Path="/TextExport/Texts">
+    <Text>
+      <GUID>1475200027</GUID>
+      <Text>TRAtUI：探测界面接口（备用键）</Text>
+    </Text>
+  </ModOp>
 </ModOps>

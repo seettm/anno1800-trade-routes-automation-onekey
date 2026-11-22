@@ -195,6 +195,36 @@
         </Item>
     </ModOp>
 
+    <!-- ui-probe 主键（feature/game-ui 分支：枚举运行时界面接口，只读不改状态） -->
+    <ModOp Type="add" GUID='2001271' Path="/Values/GUIConfig/KeyBindings">
+        <Item>
+            <KeyTypes>Shift;L</KeyTypes>
+            <Text>1475200017</Text>
+            <Command>(function() local ok,err=pcall(function() require("trat_fork/ui_companion").ProbeUI() end); local p="TRAtUI_probe.txt"; local sn=ts.GameSetup.SettingsFileName; if type(sn)=="string" then local b=sn:match("^(.*)[/\\]GameSettings[/\\]Setup%.xml$"); if b then p=b.."\\log\\TRAtUI_probe.txt" end end; local f=io.open(p,"a"); if f~=nil then f:write("HOTKEY uiprobe(Shift+L) ok="..tostring(ok).." err="..tostring(err).."\n"); f:close() end end)()</Command>
+            <Active>Session;WorldMap;Menu;Pause;Popup</Active>
+            <AvailableOnPlatforms>PC;Xbox;PS;Stadia</AvailableOnPlatforms>
+            <AudioEvent>200634</AudioEvent>
+            <Configurable>1</Configurable>
+            <HideInOptionMenu>0</HideInOptionMenu>
+            <AllowMultipleShortcuts>1</AllowMultipleShortcuts>
+        </Item>
+    </ModOp>
+
+    <!-- ui-probe 备用键 -->
+    <ModOp Type="add" GUID='2001271' Path="/Values/GUIConfig/KeyBindings">
+        <Item>
+            <KeyTypes>Ctrl;L</KeyTypes>
+            <Text>1475200027</Text>
+            <Command>(function() local ok,err=pcall(function() require("trat_fork/ui_companion").ProbeUI() end); local p="TRAtUI_probe.txt"; local sn=ts.GameSetup.SettingsFileName; if type(sn)=="string" then local b=sn:match("^(.*)[/\\]GameSettings[/\\]Setup%.xml$"); if b then p=b.."\\log\\TRAtUI_probe.txt" end end; local f=io.open(p,"a"); if f~=nil then f:write("HOTKEY uiprobe(Ctrl+L) ok="..tostring(ok).." err="..tostring(err).."\n"); f:close() end end)()</Command>
+            <Active>Session;WorldMap;Menu;Pause;Popup</Active>
+            <AvailableOnPlatforms>PC;Xbox;PS;Stadia</AvailableOnPlatforms>
+            <AudioEvent>200634</AudioEvent>
+            <Configurable>1</Configurable>
+            <HideInOptionMenu>0</HideInOptionMenu>
+            <AllowMultipleShortcuts>1</AllowMultipleShortcuts>
+        </Item>
+    </ModOp>
+
     <!-- 进游戏时挂载主脚本 -->
     <ModOp Type="addNextSibling" GUID="130248">
         <Asset>

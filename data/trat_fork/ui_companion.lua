@@ -1202,4 +1202,28 @@ function UI.ToggleEnabled()
             tostring(_G["trat_fork_status_name"] or "")));
 end
 
+--- UI 接口探测（Shift+L，仅 feature/game-ui 分支）。
+---
+--- 这个按键不参与自动化，只用来回答一个问题：这版游戏到底有没有
+--- 可编程的界面构造能力。结果写 log\TRAtUI_uiprobe.txt。
+--- 探测本身只读、不改游戏状态，失败也只落日志，不影响调度。
+function UI.ProbeUI()
+    local ok, wrote, path, err = pcall(function()
+        local P = require("trat_fork/ui_probe");
+        return P.Run();
+    end);
+
+    if not ok then
+        say("UI 探测失败：" .. tostring(wrote));
+        return;
+    end
+
+    if wrote then
+        say("UI 接口清单已写入 log\\TRAtUI_uiprobe.txt，把内容发出来即可定方案。");
+    else
+        say(string.format("UI 探测跑完了但没能写文件（path=%s err=%s），请看 base.log。",
+                tostring(path), tostring(err)));
+    end
+end
+
 return UI;

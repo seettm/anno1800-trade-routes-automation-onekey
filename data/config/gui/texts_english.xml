@@ -71,4 +71,16 @@
       <Text>TRAtUI: Show status (alt key)</Text>
     </Text>
   </ModOp>
+  <ModOp Type="add" Path="/TextExport/Texts">
+    <Text>
+      <GUID>1475200017</GUID>
+      <Text>TRAtUI: Probe UI interfaces</Text>
+    </Text>
+  </ModOp>
+  <ModOp Type="add" Path="/TextExport/Texts">
+    <Text>
+      <GUID>1475200027</GUID>
+      <Text>TRAtUI: Probe UI interfaces (alt key)</Text>
+    </Text>
+  </ModOp>
 </ModOps>
