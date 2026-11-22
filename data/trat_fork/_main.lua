@@ -104,42 +104,101 @@ local function theTradeRouteAutomation()
             base = settingsFileName:match("^(.*)[/\\]GameSettings[/\\]Setup%.xml$");
         end
 
-        -- [TRAtUI] 动态定位本 mod 的 data 目录，兼容「游戏目录 mods」与「文档 mods」两种安装位置。
-        -- 原版此处硬编码 base .. "\mods\TradeRoutesAutomation_DEV\data\"，
-        -- 导致 mod 实际装在 mod.io 或游戏目录时 require 全部失败（见 2026-11-15 游戏日志）。
+        -- [TRAtUI] 动态定位本 mod 的 data 目录。
+        --
+        -- 历史上这里踩过两次同一个坑：把 mod 文件夹名写死。
+        --   1) 原版写死 "TradeRoutesAutomation_DEV"
+        --   2) 本分支写死 "TRAtUI_Fork" —— 2026-11-22 把目录改名成
+        --      TradeRoutesAutomation_OneKey 之后，这里仍然拼出旧的
+        --      ...\mods\TRAtUI_Fork\data\ 并塞进 package.path，而那个目录已经不存在。
+        --      后果：require("trat_fork/anno_interface") 立刻失败 → 整个 mod 一行日志都不产生
+        --      （base.log 停在上一次运行的时间），而热键层报 module not found。
+        --
+        -- 现在改成：自身脚本路径 → 已知文件夹名 × 已知根目录 → 枚举 mods 目录。
+        -- 只认「该目录下确实存在 trat_fork\_main.lua」的候选，绝不返回未验证的路径。
         local function resolveLuaRoot(baseDir)
-            local candidates = {};
+            local tried = {};
 
-            -- 调试线索：这条能看出脚本是被当作虚拟路径还是绝对路径加载的
-            print("[TRAtUI] self source: " .. tostring(debug.getinfo(1, "S").source));
-
-            -- 1) 游戏安装目录：从 package.path 里的 <game>\Bin\Win64\ 反推
-            local gameRoot = package.path:match("^([^;]-)[/\\]Bin[/\\]Win64[/\\]");
-            if gameRoot ~= nil then
-                candidates[#candidates + 1] = gameRoot .. "\\mods\\TRAtUI_Fork\\data\\";
-            end
-
-            -- 2) 文档目录下的约定位置
-            if baseDir ~= nil then
-                candidates[#candidates + 1] = baseDir .. "\\mods\\TRAtUI_Fork\\data\\";
-            end
-
-            for _, candidate in ipairs(candidates) do
-                local probe = io.open(candidate .. "trat_fork\\_main.lua", "r");
-                if probe ~= nil then
-                    probe:close();
+            local function attempt(candidate)
+                if candidate == nil or candidate == "" then
+                    return nil;
+                end
+                tried[#tried + 1] = candidate;
+                local f = io.open(candidate .. "trat_fork\\_main.lua", "r");
+                if f ~= nil then
+                    f:close();
                     print("[TRAtUI] luaRoot resolved to: " .. candidate);
                     return candidate;
                 end
+                return nil;
             end
 
-            return candidates[1];
+            -- 0) 最可靠：脚本自身所在目录（引擎若给绝对路径，一步到位）
+            local src = tostring(debug.getinfo(1, "S").source or ""):gsub("^@", "");
+            print("[TRAtUI] self source: " .. src);
+            local selfDir = src:match("^(.*)[/\\]trat_fork[/\\]_main%.lua$");
+            if selfDir ~= nil then
+                local r = attempt(selfDir .. "\\");
+                if r ~= nil then return r; end
+            end
+
+            -- 1) 候选根目录：文档目录（SettingsFileName 推出）+ 游戏安装目录
+            local roots = {};
+            if baseDir ~= nil then roots[#roots + 1] = baseDir; end
+            local gameRoot = package.path:match("^([^;]-)[/\\]Bin[/\\]Win64[/\\]");
+            if gameRoot ~= nil then roots[#roots + 1] = gameRoot; end
+
+            -- 2) 已知文件夹名（当前名 + 历史名，后者兼容老用户直接覆盖升级）
+            local names = { "TradeRoutesAutomation_OneKey", "TRAtUI_Fork" };
+            for _, root in ipairs(roots) do
+                for _, name in ipairs(names) do
+                    local r = attempt(root .. "\\mods\\" .. name .. "\\data\\");
+                    if r ~= nil then return r; end
+                end
+            end
+
+            -- 3) 最后手段：枚举 mods 目录逐个试。io.popen 可能被禁用，失败就跳过。
+            for _, root in ipairs(roots) do
+                local modsDir = root .. "\\mods";
+                local okPipe, pipe = pcall(io.popen, 'dir /b /ad "' .. modsDir .. '" 2>nul');
+                if okPipe and pipe ~= nil then
+                    local found = nil;
+                    for line in pipe:lines() do
+                        local name = line:gsub("%s+$", "");
+                        if name ~= "" then
+                            found = attempt(modsDir .. "\\" .. name .. "\\data\\");
+                            if found ~= nil then break; end
+                        end
+                    end
+                    pcall(function() pipe:close(); end);
+                    if found ~= nil then return found; end
+                end
+            end
+
+            print("[TRAtUI] resolveLuaRoot FAILED, tried:\n  " .. table.concat(tried, "\n  "));
+            return nil, tried;
         end
 
-        local luaRoot = resolveLuaRoot(base);
+        -- 失败时把线索落到磁盘：这时 logger 还不存在，只能自己开文件写。
+        local function boot_note(text)
+            local dir = nil;
+            if base ~= nil then dir = base .. "\\log"; end
+            if dir ~= nil then
+                local f = io.open(dir .. "\\TRAtUI_boot.txt", "a");
+                if f ~= nil then
+                    f:write("[boot] " .. tostring(text) .. "\n");
+                    f:close();
+                end
+            end
+        end
+
+        local luaRoot, triedRoots = resolveLuaRoot(base);
         if luaRoot == nil then
+            boot_note("luaRoot 解析失败，base=" .. tostring(base) .. "；尝试过："
+                    .. table.concat(triedRoots or {}, " | "));
             error("[TRAtUI] unable to resolve mod data directory, base=" .. tostring(base));
         end
+        boot_note("luaRoot=" .. tostring(luaRoot));
         local pathEntry = luaRoot .. "?.lua";
         if package.path:find(pathEntry, 1, true) == nil then
             package.path = package.path .. ";" .. pathEntry;
