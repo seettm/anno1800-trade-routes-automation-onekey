@@ -1,0 +1,30 @@
+# ---- 系统 / 编辑器 ----
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
+.vscode/
+.idea/
+
+# ---- 打包产物（走 GitHub Releases，不入库）----
+dist/
+
+# ---- 备份与归档 ----
+*.bak
+*.bak_*
+*.orig
+*.rej
+*.tmp
+*.zip
+*.tar.gz
+*.7z
+*.rar
+
+# ---- 运行时产物（正常情况下写在 用户目录\log\，此处冗余排除）----
+*.log
+TrRAt_*
+TRAtUI_*
+area_scan_*.tsv
+*_remaining-deficit.json
+*_remaining-surplus.json

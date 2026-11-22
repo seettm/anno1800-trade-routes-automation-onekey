@@ -1,0 +1,22 @@
+{
+	"Version": "1.9.7",
+	"ModID": "TradeRoutesAutomation_OneKey",
+	"DeprecateIds": [],
+	"LoadAfterIds": [],
+	"IncompatibleIds": null,
+	"ModDependencies": null,
+	"Category": {
+		"English": "Misc"
+	},
+	"ModName": {
+		"English": "Trade Routes Automation - One-Key Edition"
+	},
+	"Description": {
+		"English": "Standalone fork of kr3v's Trade Routes Automation. Select a ship, press Shift+O to take it over, Shift+P to scan the region, Shift+K for scheduler diagnostics."
+	},
+	"KnownIssues": null,
+	"DLCDependencies": null,
+	"CreatorName": "TRAtUI fork",
+	"CreatorContact": null,
+	"Image": null
+}

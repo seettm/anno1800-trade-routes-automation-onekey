@@ -1,0 +1,74 @@
+<ModOps>
+  <ModOp Type="add" Path="/TextExport/Texts">
+    <Text>
+      <GUID>1475200011</GUID>
+      <Text>TRAtUI: scan all islands in this region</Text>
+    </Text>
+  </ModOp>
+  <ModOp Type="add" Path="/TextExport/Texts">
+    <Text>
+      <GUID>1475200012</GUID>
+      <Text>TRAtUI: force rescan this region</Text>
+    </Text>
+  </ModOp>
+  <ModOp Type="add" Path="/TextExport/Texts">
+    <Text>
+      <GUID>1475200013</GUID>
+      <Text>TRAtUI: take over selected ship</Text>
+    </Text>
+  </ModOp>
+  <ModOp Type="add" Path="/TextExport/Texts">
+    <Text>
+      <GUID>1475200014</GUID>
+      <Text>TRAtUI: release all ships</Text>
+    </Text>
+  </ModOp>
+  <ModOp Type="add" Path="/TextExport/Texts">
+    <Text>
+      <GUID>1475200015</GUID>
+      <Text>TRAtUI: toggle automation</Text>
+    </Text>
+  </ModOp>
+  <ModOp Type="add" Path="/TextExport/Texts">
+    <Text>
+      <GUID>1475200016</GUID>
+      <Text>TRAtUI: show status</Text>
+    </Text>
+  </ModOp>
+  <ModOp Type="add" Path="/TextExport/Texts">
+    <Text>
+      <GUID>1475200021</GUID>
+      <Text>TRAtUI: Scan all islands in region (alt key)</Text>
+    </Text>
+  </ModOp>
+  <ModOp Type="add" Path="/TextExport/Texts">
+    <Text>
+      <GUID>1475200022</GUID>
+      <Text>TRAtUI: Force rescan region (alt key)</Text>
+    </Text>
+  </ModOp>
+  <ModOp Type="add" Path="/TextExport/Texts">
+    <Text>
+      <GUID>1475200023</GUID>
+      <Text>TRAtUI: Take over selected ship (alt key)</Text>
+    </Text>
+  </ModOp>
+  <ModOp Type="add" Path="/TextExport/Texts">
+    <Text>
+      <GUID>1475200024</GUID>
+      <Text>TRAtUI: Release all ships (alt key)</Text>
+    </Text>
+  </ModOp>
+  <ModOp Type="add" Path="/TextExport/Texts">
+    <Text>
+      <GUID>1475200025</GUID>
+      <Text>TRAtUI: Toggle automation (alt key)</Text>
+    </Text>
+  </ModOp>
+  <ModOp Type="add" Path="/TextExport/Texts">
+    <Text>
+      <GUID>1475200026</GUID>
+      <Text>TRAtUI: Show status (alt key)</Text>
+    </Text>
+  </ModOp>
+</ModOps>

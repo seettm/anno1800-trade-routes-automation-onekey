@@ -1,0 +1,74 @@
+<ModOps>
+  <ModOp Type="add" Path="/TextExport/Texts">
+    <Text>
+      <GUID>1475200011</GUID>
+      <Text>TRAtUI：扫描本区域全部岛屿</Text>
+    </Text>
+  </ModOp>
+  <ModOp Type="add" Path="/TextExport/Texts">
+    <Text>
+      <GUID>1475200012</GUID>
+      <Text>TRAtUI：强制重扫本区域</Text>
+    </Text>
+  </ModOp>
+  <ModOp Type="add" Path="/TextExport/Texts">
+    <Text>
+      <GUID>1475200013</GUID>
+      <Text>TRAtUI：接管选中的船</Text>
+    </Text>
+  </ModOp>
+  <ModOp Type="add" Path="/TextExport/Texts">
+    <Text>
+      <GUID>1475200014</GUID>
+      <Text>TRAtUI：释放全部船只</Text>
+    </Text>
+  </ModOp>
+  <ModOp Type="add" Path="/TextExport/Texts">
+    <Text>
+      <GUID>1475200015</GUID>
+      <Text>TRAtUI：开 / 关自动化</Text>
+    </Text>
+  </ModOp>
+  <ModOp Type="add" Path="/TextExport/Texts">
+    <Text>
+      <GUID>1475200016</GUID>
+      <Text>TRAtUI：查看当前状态</Text>
+    </Text>
+  </ModOp>
+  <ModOp Type="add" Path="/TextExport/Texts">
+    <Text>
+      <GUID>1475200021</GUID>
+      <Text>TRAtUI：扫描本区域全部岛屿（备用键）</Text>
+    </Text>
+  </ModOp>
+  <ModOp Type="add" Path="/TextExport/Texts">
+    <Text>
+      <GUID>1475200022</GUID>
+      <Text>TRAtUI：强制重扫本区域（备用键）</Text>
+    </Text>
+  </ModOp>
+  <ModOp Type="add" Path="/TextExport/Texts">
+    <Text>
+      <GUID>1475200023</GUID>
+      <Text>TRAtUI：接管选中的船（备用键）</Text>
+    </Text>
+  </ModOp>
+  <ModOp Type="add" Path="/TextExport/Texts">
+    <Text>
+      <GUID>1475200024</GUID>
+      <Text>TRAtUI：释放全部船只（备用键）</Text>
+    </Text>
+  </ModOp>
+  <ModOp Type="add" Path="/TextExport/Texts">
+    <Text>
+      <GUID>1475200025</GUID>
+      <Text>TRAtUI：开 / 关自动化（备用键）</Text>
+    </Text>
+  </ModOp>
+  <ModOp Type="add" Path="/TextExport/Texts">
+    <Text>
+      <GUID>1475200026</GUID>
+      <Text>TRAtUI：查看当前状态（备用键）</Text>
+    </Text>
+  </ModOp>
+</ModOps>

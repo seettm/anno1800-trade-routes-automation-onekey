@@ -1,0 +1,254 @@
+<ModOps>
+    <!-- ===================================================================
+         TRAtUI Fork —— Trade Routes Automation 独立分支 + 一键操作入口
+         GUID 号段 1475200001+（与原 mod 的 14750000xx 隔离）
+
+         热键（v1.3 实测修订）：
+           · Shift+Alt+X 被中文输入法切换截获 → 已移除（实测 0 命中）
+           · Shift+K 实测正常送达（probe 有记录、ok=true）→ Shift+字母 为主键
+           · Ctrl+字母 作备用（实测 0 命中，可能键名不被识别，留作观察）
+           · 每条键使用独立文案 GUID，避免因共用 GUID 互相覆盖
+
+         每条 Command 内嵌探针：即使 require 失败或 UI 函数抛错，也会在
+         <用户目录>\log\TRAtUI_probe.txt 记录 ok/err。
+         路径由 ts.GameSetup.SettingsFileName 反推 —— 热键执行环境与 _main 的 _G
+         不共享，直接读 _G["trat_fork_lua_root"] 会拿到 nil 把探针写飞。
+         =================================================================== -->
+
+    <!-- scan 主键 -->
+    <ModOp Type="add" GUID='2001271' Path="/Values/GUIConfig/KeyBindings">
+        <Item>
+            <KeyTypes>Shift;P</KeyTypes>
+            <Text>1475200011</Text>
+            <Command>(function() local ok,err=pcall(function() require("trat_fork/ui_companion").ScanRegion(false) end); local p="TRAtUI_probe.txt"; local sn=ts.GameSetup.SettingsFileName; if type(sn)=="string" then local b=sn:match("^(.*)[/\\]GameSettings[/\\]Setup%.xml$"); if b then p=b.."\\log\\TRAtUI_probe.txt" end end; local f=io.open(p,"a"); if f~=nil then f:write("HOTKEY scan(Shift+P) ok="..tostring(ok).." err="..tostring(err).."\n"); f:close() end end)()</Command>
+            <Active>Session;WorldMap;Menu;Pause;Popup</Active>
+            <AvailableOnPlatforms>PC;Xbox;PS;Stadia</AvailableOnPlatforms>
+            <AudioEvent>200634</AudioEvent>
+            <Configurable>1</Configurable>
+            <HideInOptionMenu>0</HideInOptionMenu>
+            <AllowMultipleShortcuts>1</AllowMultipleShortcuts>
+        </Item>
+    </ModOp>
+
+    <!-- scan 备用键 -->
+    <ModOp Type="add" GUID='2001271' Path="/Values/GUIConfig/KeyBindings">
+        <Item>
+            <KeyTypes>Ctrl;P</KeyTypes>
+            <Text>1475200021</Text>
+            <Command>(function() local ok,err=pcall(function() require("trat_fork/ui_companion").ScanRegion(false) end); local p="TRAtUI_probe.txt"; local sn=ts.GameSetup.SettingsFileName; if type(sn)=="string" then local b=sn:match("^(.*)[/\\]GameSettings[/\\]Setup%.xml$"); if b then p=b.."\\log\\TRAtUI_probe.txt" end end; local f=io.open(p,"a"); if f~=nil then f:write("HOTKEY scan(Ctrl+P) ok="..tostring(ok).." err="..tostring(err).."\n"); f:close() end end)()</Command>
+            <Active>Session;WorldMap;Menu;Pause;Popup</Active>
+            <AvailableOnPlatforms>PC;Xbox;PS;Stadia</AvailableOnPlatforms>
+            <AudioEvent>200634</AudioEvent>
+            <Configurable>1</Configurable>
+            <HideInOptionMenu>0</HideInOptionMenu>
+            <AllowMultipleShortcuts>1</AllowMultipleShortcuts>
+        </Item>
+    </ModOp>
+
+    <!-- rescan 主键 -->
+    <ModOp Type="add" GUID='2001271' Path="/Values/GUIConfig/KeyBindings">
+        <Item>
+            <KeyTypes>Shift;F</KeyTypes>
+            <Text>1475200012</Text>
+            <Command>(function() local ok,err=pcall(function() require("trat_fork/ui_companion").ScanRegion(true) end); local p="TRAtUI_probe.txt"; local sn=ts.GameSetup.SettingsFileName; if type(sn)=="string" then local b=sn:match("^(.*)[/\\]GameSettings[/\\]Setup%.xml$"); if b then p=b.."\\log\\TRAtUI_probe.txt" end end; local f=io.open(p,"a"); if f~=nil then f:write("HOTKEY rescan(Shift+F) ok="..tostring(ok).." err="..tostring(err).."\n"); f:close() end end)()</Command>
+            <Active>Session;WorldMap;Menu;Pause;Popup</Active>
+            <AvailableOnPlatforms>PC;Xbox;PS;Stadia</AvailableOnPlatforms>
+            <AudioEvent>200634</AudioEvent>
+            <Configurable>1</Configurable>
+            <HideInOptionMenu>0</HideInOptionMenu>
+            <AllowMultipleShortcuts>1</AllowMultipleShortcuts>
+        </Item>
+    </ModOp>
+
+    <!-- rescan 备用键 -->
+    <ModOp Type="add" GUID='2001271' Path="/Values/GUIConfig/KeyBindings">
+        <Item>
+            <KeyTypes>Ctrl;F</KeyTypes>
+            <Text>1475200022</Text>
+            <Command>(function() local ok,err=pcall(function() require("trat_fork/ui_companion").ScanRegion(true) end); local p="TRAtUI_probe.txt"; local sn=ts.GameSetup.SettingsFileName; if type(sn)=="string" then local b=sn:match("^(.*)[/\\]GameSettings[/\\]Setup%.xml$"); if b then p=b.."\\log\\TRAtUI_probe.txt" end end; local f=io.open(p,"a"); if f~=nil then f:write("HOTKEY rescan(Ctrl+F) ok="..tostring(ok).." err="..tostring(err).."\n"); f:close() end end)()</Command>
+            <Active>Session;WorldMap;Menu;Pause;Popup</Active>
+            <AvailableOnPlatforms>PC;Xbox;PS;Stadia</AvailableOnPlatforms>
+            <AudioEvent>200634</AudioEvent>
+            <Configurable>1</Configurable>
+            <HideInOptionMenu>0</HideInOptionMenu>
+            <AllowMultipleShortcuts>1</AllowMultipleShortcuts>
+        </Item>
+    </ModOp>
+
+    <!-- takeover 主键 -->
+    <ModOp Type="add" GUID='2001271' Path="/Values/GUIConfig/KeyBindings">
+        <Item>
+            <KeyTypes>Shift;O</KeyTypes>
+            <Text>1475200013</Text>
+            <Command>(function() local ok,err=pcall(function() require("trat_fork/ui_companion").TakeOverSelected() end); local p="TRAtUI_probe.txt"; local sn=ts.GameSetup.SettingsFileName; if type(sn)=="string" then local b=sn:match("^(.*)[/\\]GameSettings[/\\]Setup%.xml$"); if b then p=b.."\\log\\TRAtUI_probe.txt" end end; local f=io.open(p,"a"); if f~=nil then f:write("HOTKEY takeover(Shift+O) ok="..tostring(ok).." err="..tostring(err).."\n"); f:close() end end)()</Command>
+            <Active>Session;WorldMap;Menu;Pause;Popup</Active>
+            <AvailableOnPlatforms>PC;Xbox;PS;Stadia</AvailableOnPlatforms>
+            <AudioEvent>200634</AudioEvent>
+            <Configurable>1</Configurable>
+            <HideInOptionMenu>0</HideInOptionMenu>
+            <AllowMultipleShortcuts>1</AllowMultipleShortcuts>
+        </Item>
+    </ModOp>
+
+    <!-- takeover 备用键 -->
+    <ModOp Type="add" GUID='2001271' Path="/Values/GUIConfig/KeyBindings">
+        <Item>
+            <KeyTypes>Ctrl;O</KeyTypes>
+            <Text>1475200023</Text>
+            <Command>(function() local ok,err=pcall(function() require("trat_fork/ui_companion").TakeOverSelected() end); local p="TRAtUI_probe.txt"; local sn=ts.GameSetup.SettingsFileName; if type(sn)=="string" then local b=sn:match("^(.*)[/\\]GameSettings[/\\]Setup%.xml$"); if b then p=b.."\\log\\TRAtUI_probe.txt" end end; local f=io.open(p,"a"); if f~=nil then f:write("HOTKEY takeover(Ctrl+O) ok="..tostring(ok).." err="..tostring(err).."\n"); f:close() end end)()</Command>
+            <Active>Session;WorldMap;Menu;Pause;Popup</Active>
+            <AvailableOnPlatforms>PC;Xbox;PS;Stadia</AvailableOnPlatforms>
+            <AudioEvent>200634</AudioEvent>
+            <Configurable>1</Configurable>
+            <HideInOptionMenu>0</HideInOptionMenu>
+            <AllowMultipleShortcuts>1</AllowMultipleShortcuts>
+        </Item>
+    </ModOp>
+
+    <!-- release 主键 -->
+    <ModOp Type="add" GUID='2001271' Path="/Values/GUIConfig/KeyBindings">
+        <Item>
+            <KeyTypes>Shift;I</KeyTypes>
+            <Text>1475200014</Text>
+            <Command>(function() local ok,err=pcall(function() require("trat_fork/ui_companion").ReleaseAll() end); local p="TRAtUI_probe.txt"; local sn=ts.GameSetup.SettingsFileName; if type(sn)=="string" then local b=sn:match("^(.*)[/\\]GameSettings[/\\]Setup%.xml$"); if b then p=b.."\\log\\TRAtUI_probe.txt" end end; local f=io.open(p,"a"); if f~=nil then f:write("HOTKEY release(Shift+I) ok="..tostring(ok).." err="..tostring(err).."\n"); f:close() end end)()</Command>
+            <Active>Session;WorldMap;Menu;Pause;Popup</Active>
+            <AvailableOnPlatforms>PC;Xbox;PS;Stadia</AvailableOnPlatforms>
+            <AudioEvent>200634</AudioEvent>
+            <Configurable>1</Configurable>
+            <HideInOptionMenu>0</HideInOptionMenu>
+            <AllowMultipleShortcuts>1</AllowMultipleShortcuts>
+        </Item>
+    </ModOp>
+
+    <!-- release 备用键 -->
+    <ModOp Type="add" GUID='2001271' Path="/Values/GUIConfig/KeyBindings">
+        <Item>
+            <KeyTypes>Ctrl;I</KeyTypes>
+            <Text>1475200024</Text>
+            <Command>(function() local ok,err=pcall(function() require("trat_fork/ui_companion").ReleaseAll() end); local p="TRAtUI_probe.txt"; local sn=ts.GameSetup.SettingsFileName; if type(sn)=="string" then local b=sn:match("^(.*)[/\\]GameSettings[/\\]Setup%.xml$"); if b then p=b.."\\log\\TRAtUI_probe.txt" end end; local f=io.open(p,"a"); if f~=nil then f:write("HOTKEY release(Ctrl+I) ok="..tostring(ok).." err="..tostring(err).."\n"); f:close() end end)()</Command>
+            <Active>Session;WorldMap;Menu;Pause;Popup</Active>
+            <AvailableOnPlatforms>PC;Xbox;PS;Stadia</AvailableOnPlatforms>
+            <AudioEvent>200634</AudioEvent>
+            <Configurable>1</Configurable>
+            <HideInOptionMenu>0</HideInOptionMenu>
+            <AllowMultipleShortcuts>1</AllowMultipleShortcuts>
+        </Item>
+    </ModOp>
+
+    <!-- toggle 主键 -->
+    <ModOp Type="add" GUID='2001271' Path="/Values/GUIConfig/KeyBindings">
+        <Item>
+            <KeyTypes>Shift;U</KeyTypes>
+            <Text>1475200015</Text>
+            <Command>(function() local ok,err=pcall(function() require("trat_fork/ui_companion").ToggleEnabled() end); local p="TRAtUI_probe.txt"; local sn=ts.GameSetup.SettingsFileName; if type(sn)=="string" then local b=sn:match("^(.*)[/\\]GameSettings[/\\]Setup%.xml$"); if b then p=b.."\\log\\TRAtUI_probe.txt" end end; local f=io.open(p,"a"); if f~=nil then f:write("HOTKEY toggle(Shift+U) ok="..tostring(ok).." err="..tostring(err).."\n"); f:close() end end)()</Command>
+            <Active>Session;WorldMap;Menu;Pause;Popup</Active>
+            <AvailableOnPlatforms>PC;Xbox;PS;Stadia</AvailableOnPlatforms>
+            <AudioEvent>200634</AudioEvent>
+            <Configurable>1</Configurable>
+            <HideInOptionMenu>0</HideInOptionMenu>
+            <AllowMultipleShortcuts>1</AllowMultipleShortcuts>
+        </Item>
+    </ModOp>
+
+    <!-- toggle 备用键 -->
+    <ModOp Type="add" GUID='2001271' Path="/Values/GUIConfig/KeyBindings">
+        <Item>
+            <KeyTypes>Ctrl;U</KeyTypes>
+            <Text>1475200025</Text>
+            <Command>(function() local ok,err=pcall(function() require("trat_fork/ui_companion").ToggleEnabled() end); local p="TRAtUI_probe.txt"; local sn=ts.GameSetup.SettingsFileName; if type(sn)=="string" then local b=sn:match("^(.*)[/\\]GameSettings[/\\]Setup%.xml$"); if b then p=b.."\\log\\TRAtUI_probe.txt" end end; local f=io.open(p,"a"); if f~=nil then f:write("HOTKEY toggle(Ctrl+U) ok="..tostring(ok).." err="..tostring(err).."\n"); f:close() end end)()</Command>
+            <Active>Session;WorldMap;Menu;Pause;Popup</Active>
+            <AvailableOnPlatforms>PC;Xbox;PS;Stadia</AvailableOnPlatforms>
+            <AudioEvent>200634</AudioEvent>
+            <Configurable>1</Configurable>
+            <HideInOptionMenu>0</HideInOptionMenu>
+            <AllowMultipleShortcuts>1</AllowMultipleShortcuts>
+        </Item>
+    </ModOp>
+
+    <!-- status 主键 -->
+    <ModOp Type="add" GUID='2001271' Path="/Values/GUIConfig/KeyBindings">
+        <Item>
+            <KeyTypes>Shift;K</KeyTypes>
+            <Text>1475200016</Text>
+            <Command>(function() local ok,err=pcall(function() require("trat_fork/ui_companion").Status() end); local p="TRAtUI_probe.txt"; local sn=ts.GameSetup.SettingsFileName; if type(sn)=="string" then local b=sn:match("^(.*)[/\\]GameSettings[/\\]Setup%.xml$"); if b then p=b.."\\log\\TRAtUI_probe.txt" end end; local f=io.open(p,"a"); if f~=nil then f:write("HOTKEY status(Shift+K) ok="..tostring(ok).." err="..tostring(err).."\n"); f:close() end end)()</Command>
+            <Active>Session;WorldMap;Menu;Pause;Popup</Active>
+            <AvailableOnPlatforms>PC;Xbox;PS;Stadia</AvailableOnPlatforms>
+            <AudioEvent>200634</AudioEvent>
+            <Configurable>1</Configurable>
+            <HideInOptionMenu>0</HideInOptionMenu>
+            <AllowMultipleShortcuts>1</AllowMultipleShortcuts>
+        </Item>
+    </ModOp>
+
+    <!-- status 备用键 -->
+    <ModOp Type="add" GUID='2001271' Path="/Values/GUIConfig/KeyBindings">
+        <Item>
+            <KeyTypes>Ctrl;K</KeyTypes>
+            <Text>1475200026</Text>
+            <Command>(function() local ok,err=pcall(function() require("trat_fork/ui_companion").Status() end); local p="TRAtUI_probe.txt"; local sn=ts.GameSetup.SettingsFileName; if type(sn)=="string" then local b=sn:match("^(.*)[/\\]GameSettings[/\\]Setup%.xml$"); if b then p=b.."\\log\\TRAtUI_probe.txt" end end; local f=io.open(p,"a"); if f~=nil then f:write("HOTKEY status(Ctrl+K) ok="..tostring(ok).." err="..tostring(err).."\n"); f:close() end end)()</Command>
+            <Active>Session;WorldMap;Menu;Pause;Popup</Active>
+            <AvailableOnPlatforms>PC;Xbox;PS;Stadia</AvailableOnPlatforms>
+            <AudioEvent>200634</AudioEvent>
+            <Configurable>1</Configurable>
+            <HideInOptionMenu>0</HideInOptionMenu>
+            <AllowMultipleShortcuts>1</AllowMultipleShortcuts>
+        </Item>
+    </ModOp>
+
+    <!-- 进游戏时挂载主脚本 -->
+    <ModOp Type="addNextSibling" GUID="130248">
+        <Asset>
+            <Template>Trigger</Template>
+            <Values>
+                <Standard>
+                    <GUID>1475200100</GUID>
+                    <Name>TRAtUI Fork - register lua on SessionEnter</Name>
+                </Standard>
+                <Trigger>
+                    <TriggerCondition>
+                        <Template>ConditionEvent</Template>
+                        <Values>
+                            <Condition/>
+                            <ConditionEvent>
+                                <ConditionEvent>SessionEnter</ConditionEvent>
+                                <ContextAssetInfolayer>0</ContextAssetInfolayer>
+                            </ConditionEvent>
+                            <ConditionPropsNegatable/>
+                        </Values>
+                    </TriggerCondition>
+                    <TriggerActions>
+                        <Item>
+                            <TriggerAction>
+                                <Template>ActionExecuteScript</Template>
+                                <Values>
+                                    <Action/>
+                                    <ActionExecuteScript>
+                                        <ScriptFileName>data/trat_fork/_main.lua</ScriptFileName>
+                                    </ActionExecuteScript>
+                                </Values>
+                            </TriggerAction>
+                        </Item>
+                    </TriggerActions>
+                    <ResetTrigger>
+                        <Template>AutoCreateTrigger</Template>
+                        <Values>
+                            <Trigger>
+                                <TriggerCondition>
+                                    <Template>ConditionAlwaysTrue</Template>
+                                    <Values>
+                                        <Condition/>
+                                        <ConditionAlwaysTrue/>
+                                    </Values>
+                                </TriggerCondition>
+                            </Trigger>
+                        </Values>
+                    </ResetTrigger>
+                </Trigger>
+                <TriggerSetup>
+                    <AutoRegisterTrigger>1</AutoRegisterTrigger>
+                    <UsedBySecondParties>0</UsedBySecondParties>
+                </TriggerSetup>
+            </Values>
+        </Asset>
+    </ModOp>
+</ModOps>
