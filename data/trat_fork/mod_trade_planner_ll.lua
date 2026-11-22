@@ -10,6 +10,82 @@ local TradePlannerLL = {
     }
 };
 
+-- ===========================================================================
+-- 调度策略（v1.11.0）
+--
+-- 原版所有环节都用一个硬编码的 50 作为「最小发运量」：
+--   源岛余量 < 50 不算供给、目的岛缺口 < 50 不算需求、
+--   可转移量 < 50 不建订单、船装不满 50 不发船。
+-- 结果是：一座岛只剩 30 吨鱼，另一座岛饿着，调度器判定「没有任何岛屿可供」，
+-- 船一动不动 —— 这对**生活必需品**尤其致命，因为它本来就该有多少搬多少。
+--
+-- 现在按货物类型分两套阈值：
+--   · 基本需求货物（居民消耗品，数据来自 residence_info 的 Request 列表）
+--     → 阈值降到 10，远低于此才不发，剩余量哪怕只有十几吨也会被搬走
+--   · 其它货物（工业原料、建筑材料）
+--     → 保持原来的 50，避免为了几吨零件让船跑一趟
+--
+-- 想改行为不用翻代码：直接改下面 Policy 里的数值即可。
+-- ===========================================================================
+TradePlannerLL.Policy = {
+    -- 非基本需求货物的最小发运量（原版行为）
+    minTransferNormal = 50,
+    -- 基本需求货物的最小发运量：调小 = 更积极，调大到 50 = 退回原版
+    minTransferBasic = 10,
+    -- 基本需求货物的存留目标（占岛屿单货容量的比例）。
+    -- 原版把目标压在 10/25/50（即 13%~28%），等于「快见底了才补货」。
+    -- 0.6 = 让每座岛尽量维持六成库存，低于此才进货，高于此的余量才会外运。
+    basicTargetRatio = 0.6,
+    -- 基本需求货物的「让渡底线」：源岛库存高于这个水位才愿意往外给。
+    -- 和上面的 0.6 分开是有意的 —— 只有一个水位会导致
+    -- 「源岛自己不满六成 → 一吨都不给」，明明还有富余却让目的岛饿着。
+    -- 0.3 = 自己留三成，三成以上的都算可调剂的余量。
+    basicKeepRatio = 0.3,
+    -- 基本需求判定开关（false = 全部按 50 处理，用于对比排查）
+    basicNeedEnabled = true,
+    -- 额外视为「基本需求」的货物 GUID（数据里认不出来的可手工补）
+    -- 默认空；例如想强制把木材算进去就加 120008
+    extraBasicGoods = {},
+};
+
+--- 某种货物本次允许的最小发运量。
+---@param isBasic boolean
+---@return number
+local function min_transfer_for(isBasic)
+    local p = TradePlannerLL.Policy;
+    if isBasic then
+        return p.minTransferBasic or 10;
+    end
+    return p.minTransferNormal or 50;
+end
+
+--- 构建「本区域生活必需品」集合：任何一座岛屿的居民会消耗的货物都算。
+--- 数据源是 residence_info.json 的 Request 列表，不写死 GUID，
+--- 所以新 DLC / 新人口等级只要被扫描进来就自动生效。
+---@param L Logger
+---@param region RegionID
+---@return table<number, boolean>
+local function build_basic_need_set(L, region)
+    local set = {};
+    if TradePlannerLL.Policy.basicNeedEnabled == false then
+        return set;
+    end
+
+    local ok, union = pcall(AreasRequest.Population_Union, L, region);
+    if ok and type(union) == "table" then
+        for guid in pairs(union) do
+            set[tonumber(guid) or guid] = true;
+        end
+    else
+        L.logf("[TRAtUI] 基本需求集合构建失败：%s", tostring(union));
+    end
+
+    for _, guid in ipairs(TradePlannerLL.Policy.extraBasicGoods or {}) do
+        set[tonumber(guid) or guid] = true;
+    end
+    return set;
+end
+
 ---@generic K1, K2, V
 ---@param k123 table<K1, table<K2, V>>
 ---@return table<K2, table<K1, V>>
@@ -123,6 +199,8 @@ end
 ---@return TradePlanner.SupplyRequestTable
 function TradePlannerLL.SupplyRequest_Build(L, region, _stockFromInFlight, areas)
     local areaToProductRequest = AreasRequest.All(L, region);
+    -- [v1.11.0] 生活必需品集合：这些货物的最小发运量会降到 Policy.minTransferBasic
+    local basicNeed = build_basic_need_set(L, region);
     local allProducts = {};
     for areaID, products in pairs(areaToProductRequest) do
         for productID, _ in pairs(products) do
@@ -147,9 +225,13 @@ function TradePlannerLL.SupplyRequest_Build(L, region, _stockFromInFlight, areas
 
             local inFlightStock = inFlightStock_area[productID] or 0;
 
+            -- [v1.11.0] 按货物类型选阈值：生活必需品 10，其它 50
+            local isBasic = basicNeed[productID] == true;
+            local MIN = min_transfer_for(isBasic);
+
             local _stock = Anno.Area_GetGood(region, areaID, productID);
             -- [TRAtUI] 必须保证是数字。库存查询失败时返回 nil，
-            -- 而下面 194/199 行要拿它和 _request ± 50 做大小比较，
+            -- 而下面要拿它和 _request ± 阈值 做大小比较，
             -- nil 会直接抛 "attempt to compare number with nil"，
             -- 整轮 iteration 报废（实测 2026-11-15 18:52 每轮都崩在这里，船一步不动）。
             -- 取不到库存按 0 处理：方向是安全的，最坏只是多派一次货，
@@ -171,6 +253,17 @@ function TradePlannerLL.SupplyRequest_Build(L, region, _stockFromInFlight, areas
             if doesAreaRequestProduct then
                 _request = math.min(_areaCap, 200);
             end
+            -- [v1.11.0] 必需品存留目标 = 容量 × basicTargetRatio。
+            -- 这一步不能省：若沿用 min(cap,200)=满仓做目标，只有「已经装满」的岛
+            -- 才算有盈余，供给端会几乎全灭；若沿用 10/25/50，则目的地又只在快空时才补。
+            -- 取中间的 60% 才能同时满足「缺了就补」和「多了才给」。
+            if isBasic and _request > 0 then
+                local ratio = TradePlannerLL.Policy.basicTargetRatio or 0.6;
+                _request = math.floor(_areaCap * ratio);
+                if _request < 1 then
+                    _request = 1;
+                end
+            end
             if _request == 0 and _stock == 0 then
                 goto continue;
             end
@@ -178,41 +271,71 @@ function TradePlannerLL.SupplyRequest_Build(L, region, _stockFromInFlight, areas
             L.logf("Area %s (id=%d) %s stock=%s (+%s) request=%s", areaData.city_name, areaID, productName, _stock, inFlightStock, _request);
             _request = _request - inFlightStock;
 
-            if _areaCap == 75 then
-                -- small area
-                if _stock > 0 and _request == 0 then
-                    -- do nothing? we will transfer at least 50
-                elseif _stock == 0 and _request > 0 then
-                    -- do nothing? let it get as much as it can
-                elseif _stock > 0 and _request > 0 then
-                    _request = 10; -- let it transfer at 60 before cap is hit
-                end
-            elseif _areaCap == 125 then
-                -- medium area
-                if _stock > 0 and _request == 0 then
-                    -- do nothing? we will transfer at least 50
-                elseif _stock == 0 and _request > 0 then
-                    -- do nothing? let it get as much as it can
-                elseif _stock > 0 and _request > 0 then
-                    _request = 25; -- let it transfer at 75 before cap is hit
-                end
-            elseif _areaCap == 175 then
-                -- large area
-                if _stock > 0 and _request == 0 then
-                    -- do nothing? we will transfer at least 50
-                elseif _stock == 0 and _request > 0 then
-                    -- do nothing? let it get as much as it can
-                elseif _stock > 0 and _request > 0 then
-                    _request = 50; -- let it transfer at 90 before cap is hit
+            -- [v1.11.0] 这三段「小岛/中岛/大岛」启发式对生活必需品是有害的：
+            -- 它把目标量砍到 10/25/50，意思是「等库存掉到快见底了再补」。
+            -- 对工业原料合理（少跑几趟），对鱼和土豆这类就不合理 ——
+            -- 一座 5/75 的岛明明缺 70，却被算成「不缺」，船一步不动。
+            -- 所以必需品直接跳过这套启发式，目标量 = 满仓。
+            if not isBasic then
+                if _areaCap == 75 then
+                    -- small area
+                    if _stock > 0 and _request == 0 then
+                        -- do nothing? we will transfer at least 50
+                    elseif _stock == 0 and _request > 0 then
+                        -- do nothing? let it get as much as it can
+                    elseif _stock > 0 and _request > 0 then
+                        _request = 10; -- let it transfer at 60 before cap is hit
+                    end
+                elseif _areaCap == 125 then
+                    -- medium area
+                    if _stock > 0 and _request == 0 then
+                        -- do nothing? we will transfer at least 50
+                    elseif _stock == 0 and _request > 0 then
+                        -- do nothing? let it get as much as it can
+                    elseif _stock > 0 and _request > 0 then
+                        _request = 25; -- let it transfer at 75 before cap is hit
+                    end
+                elseif _areaCap == 175 then
+                    -- large area
+                    if _stock > 0 and _request == 0 then
+                        -- do nothing? we will transfer at least 50
+                    elseif _stock == 0 and _request > 0 then
+                        -- do nothing? let it get as much as it can
+                    elseif _stock > 0 and _request > 0 then
+                        _request = 50; -- let it transfer at 90 before cap is hit
+                    end
                 end
             end
 
-            if _stock >= _request + 50 and _stock >= 50 then
+            -- [v1.11.0] 生活必需品单独一套算法，不再借用 _request 这个「单一水位」：
+            --   补货：低于 容量×basicTargetRatio(0.6) 就算缺口
+            --   出货：高于 容量×basicKeepRatio(0.3)  的部分才算余量
+            -- 两个水位分开，才能做到「自己还够用、多出来的就给出去」，
+            -- 也就是你说的「库存不满足也要搬运」——不再要求源岛攒够 50 或满 60%。
+            if isBasic then
+                local keep = math.floor(_areaCap * (TradePlannerLL.Policy.basicKeepRatio or 0.3));
+                local spare = _stock - keep;
+                local need = _request - _stock;   -- _request 已含 -inFlightStock
+
+                if spare >= MIN then
+                    if supply[areaID] == nil then
+                        supply[areaID] = {};
+                    end
+                    supply[areaID][productID] = spare;
+                elseif need >= MIN then
+                    if request[areaID] == nil then
+                        request[areaID] = {};
+                    end
+                    request[areaID][productID] = need;
+                end
+
+            -- 非必需品：保持原版的 50 水位逻辑
+            elseif _stock >= _request + MIN and _stock >= MIN then
                 if supply[areaID] == nil then
                     supply[areaID] = {};
                 end
                 supply[areaID][productID] = _stock - _request;
-            elseif _request - _stock >= 50 then
+            elseif _request - _stock >= MIN then
                 if request[areaID] == nil then
                     request[areaID] = {};
                 end
@@ -227,23 +350,28 @@ function TradePlannerLL.SupplyRequest_Build(L, region, _stockFromInFlight, areas
     local ret = {};
     ret.Supply = supply;
     ret.Request = request;
+    -- [v1.11.0] 下游（订单生成 / 派船 / 执行）需要知道哪些货物享受低阈值，
+    -- 否则这里放行了、后面几道 50 的闸门又会把它拦回去。
+    ret.BasicNeed = basicNeed;
 
     -- [TRAtUI] 供需摘要：判断「船为什么不动」最直接的证据。
     -- 之前每轮都在上面崩掉，玩家只看到一行报错；现在把结果摊开，
-    -- 一眼区分「两岛之间没有 50+ 的余量/缺口」和「有供需但订单被跳过」。
+    -- 一眼区分「没有达到阈值的余量/缺口」和「有供需但订单被跳过」。
     local function dump(tbl, tag)
         local n = 0;
         for areaID, goods in pairs(tbl) do
             for productID, amount in pairs(goods) do
                 n = n + 1;
                 local p = AnnoInfo.Product(productID);
-                L.logf("[TRAtUI] %s area=%d(%s) %s amount=%d", tag, areaID,
+                local basicMark = basicNeed[productID] and " [必需品]" or "";
+                L.logf("[TRAtUI] %s area=%d(%s) %s amount=%d%s", tag, areaID,
                         tostring(Anno.Area_CityName(region, areaID)),
-                        p ~= nil and p.Name or tostring(productID), amount);
+                        p ~= nil and p.Name or tostring(productID), amount, basicMark);
             end
         end
         if n == 0 then
-            L.logf("[TRAtUI] %s 为空：没有任何岛屿达到 50 单位的余量/缺口", tag);
+            L.logf("[TRAtUI] %s 为空：没有任何岛屿达到阈值（必需品 %d / 其它 %d）",
+                    tag, min_transfer_for(true), min_transfer_for(false));
         end
     end
     dump(supply, "供给");
@@ -271,6 +399,8 @@ function TradePlannerLL.SupplyRequest_BuildHubs(L, region, _stockFromInFlight, a
     end
 
     local areaToProductRequest = AreasRequest.All(L, region);
+    -- [v1.11.0] hub 路径同样按货物类型分阈值
+    local basicNeed = build_basic_need_set(L, region);
     local allProducts = {};
     for areaID, products in pairs(areaToProductRequest) do
         for productID, _ in pairs(products) do
@@ -289,6 +419,10 @@ function TradePlannerLL.SupplyRequest_BuildHubs(L, region, _stockFromInFlight, a
                 goto continue;
             end
             local productName = product.Name;
+
+            -- [v1.11.0] 按货物类型选阈值
+            local isBasic = basicNeed[productID] == true;
+            local MIN = min_transfer_for(isBasic);
 
             local inFlightStock = inFlightStock_area[productID] or 0;
 
@@ -312,6 +446,14 @@ function TradePlannerLL.SupplyRequest_BuildHubs(L, region, _stockFromInFlight, a
                 _request = _areaCap * 90 / 100;
             elseif doesAreaRequestProduct then
                 _request = math.min(_areaCap, 200);
+                -- [v1.11.0] 非枢纽岛的必需品：存留目标按比例，缺了就补
+                if isBasic then
+                    local ratio = TradePlannerLL.Policy.basicTargetRatio or 0.6;
+                    _request = math.floor(_areaCap * ratio);
+                    if _request < 1 then
+                        _request = 1;
+                    end
+                end
             end
 
             if _request == 0 and _stock == 0 then
@@ -321,12 +463,12 @@ function TradePlannerLL.SupplyRequest_BuildHubs(L, region, _stockFromInFlight, a
             L.logf("Area %s (id=%s) %s stock=%s (+%s) request=%s", areaData.city_name, areaID, productName, _stock, inFlightStock, _request);
             _stock = _stock + inFlightStock;
 
-            if _stock >= _request * 2 and _stock >= 50 then
+            if _stock >= _request * 2 and _stock >= MIN then
                 if supply[areaID] == nil then
                     supply[areaID] = {};
                 end
                 supply[areaID][productID] = _stock - _request;
-            elseif _request - _stock >= 50 and areaID == hub then
+            elseif _request - _stock >= MIN and areaID == hub then
                 if request[areaID] == nil then
                     request[areaID] = {};
                 end
@@ -341,6 +483,7 @@ function TradePlannerLL.SupplyRequest_BuildHubs(L, region, _stockFromInFlight, a
     local ret = {};
     ret.Supply = supply;
     ret.Request = request;
+    ret.BasicNeed = basicNeed;
     return ret;
 end
 
@@ -355,10 +498,15 @@ function TradePlannerLL.SupplyRequest_ToOrders(
 )
     local request_orders = {} -- table<orderKeyType, orderValueType>
 
+    -- [v1.11.0] 生活必需品享受低阈值；带上这个标记，后面两道闸门才能同步放行
+    local basicNeed = supplyRequest.BasicNeed or {};
+
     local supply_gta = dict123to213(supplyRequest.Supply)
 
     for areaID, area_requests in pairs(supplyRequest.Request) do
         for goodID, amount in pairs(area_requests) do
+            local isBasic = basicNeed[goodID] == true;
+            local MIN = min_transfer_for(isBasic);
             local supply_areas = supply_gta[goodID]
             if supply_areas == nil then
                 -- [TRAtUI] 有缺口但没有任何岛有盈余：这是「船不动」最常见的正常原因，
@@ -377,9 +525,9 @@ function TradePlannerLL.SupplyRequest_ToOrders(
                                 supply_areaID, areaID, goodID);
                         goto continue;
                     end
-                    if transfer_amount < 50 then
-                        L.logf("Skipping order from area %d to area %d for good %d due to insufficient transfer amount: %d < 50 (needed=%d available=%d)",
-                                supply_areaID, areaID, goodID, transfer_amount, amount, supply_amount);
+                    if transfer_amount < MIN then
+                        L.logf("Skipping order from area %d to area %d for good %d due to insufficient transfer amount: %d < %d (needed=%d available=%d basic=%s)",
+                                supply_areaID, areaID, goodID, transfer_amount, MIN, amount, supply_amount, tostring(isBasic));
                         goto continue;
                     end
 
@@ -389,6 +537,7 @@ function TradePlannerLL.SupplyRequest_ToOrders(
                         GoodID = goodID,
                         RequestAmount = amount,
                         SupplyAmount = supply_amount,
+                        IsBasic = isBasic,
                     }
                     local value = {
                         OrderDistance = distance,
@@ -449,9 +598,9 @@ function TradePlannerLL.SupplyRequestOrders_ToShipCommands(
                 amount = order_key.SupplyAmount;
             end
 
-            if amount < 50 then
-                L.logf("Skipping command for ship %d due to insufficient transfer amount: %d < 50",
-                        ship, amount);
+            if amount < min_transfer_for(order_key.IsBasic == true) then
+                L.logf("Skipping command for ship %d due to insufficient transfer amount: %d < %d (basic=%s)",
+                        ship, amount, min_transfer_for(order_key.IsBasic == true), tostring(order_key.IsBasic));
                 goto continue;
             end
 
@@ -528,14 +677,24 @@ function TradePlannerLL.SupplyRequestShipCommands_Execute(
             goto continue;
         end
 
+        -- [v1.11.0] 生活必需品：库存不够整单就按剩余量装，不整单放弃。
+        -- 原逻辑是「供给不足就跳过」，于是前面几单把货源抽掉一部分之后，
+        -- 后面这单明明还能装七八十吨也会被整单丢掉。
+        local MIN_ORDER = min_transfer_for(order.IsBasic == true);
         if available_supply < amount then
-            L.logf("Skipping order: insufficient supply: available_supply=%d < order=%d",
-                    available_supply, amount);
-            goto continue;
+            if order.IsBasic == true and available_supply >= MIN_ORDER then
+                L.logf("[TRAtUI] 必需品按剩余量发运 good=%s 原计划=%d 实际=%d",
+                        tostring(order.GoodID), amount, available_supply);
+                amount = available_supply;
+            else
+                L.logf("Skipping order: insufficient supply: available_supply=%d < order=%d",
+                        available_supply, amount);
+                goto continue;
+            end
         end
-        if available_request < 50 then
-            L.logf("Skipping order: insufficient request: available_request=%d (type=%s) < 50 %s",
-                    available_request, type(available_request), available_request < 50);
+        if available_request < MIN_ORDER then
+            L.logf("Skipping order: insufficient request: available_request=%d (type=%s) < %d basic=%s",
+                    available_request, type(available_request), MIN_ORDER, tostring(order.IsBasic));
             goto continue;
         end
 

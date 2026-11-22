@@ -101,6 +101,28 @@ function AreaRequests.TradeUnionAlikeReplacements(L, region)
     return ret;
 end
 
+-- [TRAtUI][v1.11.0] 区域级「居民消耗货物」并集。
+-- 与 Population 的区别：Population 是「某座岛需要什么」，这里回答
+-- 「本区域被居民消费的所有货物是什么」，用于判定哪些属于生活必需品
+-- （这类货物即使达不到 50 单位的余量门槛也要照常发运）。
+---@param L Logger
+---@param region RegionID
+---@return table<number, boolean>
+function AreaRequests.Population_Union(L, region)
+    local ret = {};
+    local ok, population = pcall(AreaRequests.Population, L, region);
+    if not ok or type(population) ~= "table" then
+        L.logf("[TRAtUI] Population_Union 失败：%s", tostring(population));
+        return ret;
+    end
+    for _, products in pairs(population) do
+        for productGuid in pairs(products) do
+            ret[tonumber(productGuid) or productGuid] = true;
+        end
+    end
+    return ret;
+end
+
 function AreaRequests.All(L, region)
     local population = AreaRequests.Population(L, region);
     local production = AreaRequests.Production(L, region);
