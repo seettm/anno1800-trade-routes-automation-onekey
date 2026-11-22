@@ -4,6 +4,9 @@ local AnnoInfo = require("trat_fork/generator/products");
 local AreaRequests = {
     __Internal = {
         ProductGUID_Unknown = {},
+        -- [v1.11.1] 住宅 GUID 认不出来时只报一次：Population 现在每轮会被调两次
+        -- （一次给供需表、一次给必需品判定），不去重日志会成倍膨胀。
+        ResidenceGUID_Unknown = {},
     }
 };
 
@@ -14,7 +17,11 @@ function AreaRequests.Population(L, region)
         for _, guid in pairs(residenceGUIDs) do
             local residence = AnnoInfo.Residence(L, region, tonumber(guid));
             if residence == nil or residence.Request == nil then
-                L.logf("Warning: Residence GUID %d not found in AnnoInfo.ResidencesInfo", tonumber(guid));
+                local g = tonumber(guid);
+                if AreaRequests.__Internal.ResidenceGUID_Unknown[g] == nil then
+                    AreaRequests.__Internal.ResidenceGUID_Unknown[g] = true;
+                    L.logf("Warning: Residence GUID %d not found in AnnoInfo.ResidencesInfo", g);
+                end
                 goto continue;
             end
             for _, product in pairs(residence.Request) do

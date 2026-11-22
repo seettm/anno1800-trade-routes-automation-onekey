@@ -162,9 +162,10 @@ local function tradeExecutor_remainingSurplusDeficit(
     local request = supplyRequest.Request;
     -- [v1.11.0] 看板也要跟着策略走：必需品阈值更低，否则会出现
     -- 「调度实际在运，看板却显示 0 缺口」的割裂。
+    -- [v1.11.1] 必需品按岛判定，所以阈值查询必须带上 areaID
     local basicNeed = supplyRequest.BasicNeed or {};
-    local function threshold_of(goodID)
-        if basicNeed[goodID] == true then
+    local function threshold_of(areaID, goodID)
+        if TradePlannerLL.IsBasicFor and TradePlannerLL.IsBasicFor(basicNeed, areaID, goodID) then
             return (TradePlannerLL.Policy and TradePlannerLL.Policy.minTransferBasic) or 10;
         end
         return (TradePlannerLL.Policy and TradePlannerLL.Policy.minTransferNormal) or 50;
@@ -174,7 +175,7 @@ local function tradeExecutor_remainingSurplusDeficit(
     local remainingDeficit = {};
     for areaID, goods in pairs(request) do
         for goodID, amount in pairs(goods) do
-            if amount >= threshold_of(goodID) then
+            if amount >= threshold_of(areaID, goodID) then
                 local goodIdStr = tostring(goodID);
 
                 if remainingDeficit[goodIdStr] == nil then
@@ -196,7 +197,7 @@ local function tradeExecutor_remainingSurplusDeficit(
     local remainingSurplus = {};
     for areaID, goods in pairs(supply) do
         for goodID, amount in pairs(goods) do
-            if amount >= threshold_of(goodID) then
+            if amount >= threshold_of(areaID, goodID) then
                 local goodIdStr = tostring(goodID);
 
                 if remainingSurplus[goodIdStr] == nil then

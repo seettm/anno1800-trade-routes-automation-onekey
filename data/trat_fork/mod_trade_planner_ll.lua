@@ -25,6 +25,10 @@ local TradePlannerLL = {
 --   · 其它货物（工业原料、建筑材料）
 --     → 保持原来的 50，避免为了几吨零件让船跑一趟
 --
+-- v1.11.1：基本需求的判定粒度是**每座岛各自实际存在的人口等级**
+-- （工人岛不会把小提琴当必需品），数据全部来自游戏内的住宅定义，
+-- 不写死 GUID、也不依赖任何人工清单。
+--
 -- 想改行为不用翻代码：直接改下面 Policy 里的数值即可。
 -- ===========================================================================
 TradePlannerLL.Policy = {
@@ -43,7 +47,11 @@ TradePlannerLL.Policy = {
     basicKeepRatio = 0.3,
     -- 基本需求判定开关（false = 全部按 50 处理，用于对比排查）
     basicNeedEnabled = true,
-    -- 额外视为「基本需求」的货物 GUID（数据里认不出来的可手工补）
+    -- [v1.11.1] 必需品判定的粒度：
+    --   "island" = 按每座岛「实际住着的人口等级」判定（默认，最贴游戏实际情况）
+    --   "region" = 退回 v1.11.0 的全区并集（所有住宅需求的货全算，最激进）
+    basicNeedScope = "island",
+    -- 额外视为「基本需求」的货物 GUID（数据里认不出来的可手工补，全区生效）
     -- 默认空；例如想强制把木材算进去就加 120008
     extraBasicGoods = {},
 };
@@ -59,31 +67,134 @@ local function min_transfer_for(isBasic)
     return p.minTransferNormal or 50;
 end
 
---- 构建「本区域生活必需品」集合：任何一座岛屿的居民会消耗的货物都算。
---- 数据源是 residence_info.json 的 Request 列表，不写死 GUID，
---- 所以新 DLC / 新人口等级只要被扫描进来就自动生效。
+--- 构建「生活必需品」集合。
+---
+--- 数据源是 residence_info.json 的 Request 列表（游戏内住宅定义的导出），
+--- 不写死 GUID，也不依赖截图/手工清单 —— 新 DLC、新人口等级只要被扫描进来就自动生效。
+---
+--- [v1.11.1] 粒度从「全区并集」收紧到「每座岛各自实际存在的人口等级」：
+--- 原先取全区并集，等于把玩家根本没建的摩天楼（小提琴、蒸汽马车、留声机…）
+--- 一起算作必需品，69 种货物全部降到 10，50 的门槛事实上失效，
+--- 船会为了十几吨缝纫机跑一趟。现在只有**该岛真有居民消耗**的货才降阈值：
+--- 鱼、面包、啤酒、香肠这类该便宜就便宜，工业原料照旧按 50。
 ---@param L Logger
 ---@param region RegionID
----@return table<number, boolean>
-local function build_basic_need_set(L, region)
-    local set = {};
+---@return table<AreaID, table<number, boolean>> byArea 每座岛各自的必需品
+---@return table<number, boolean> regionUnion 全区并集（basicNeedScope="region" 与兜底用）
+local function build_basic_need_by_area(L, region)
+    local byArea = {};
+    local regionUnion = {};
     if TradePlannerLL.Policy.basicNeedEnabled == false then
-        return set;
+        return byArea, regionUnion;
     end
 
-    local ok, union = pcall(AreasRequest.Population_Union, L, region);
-    if ok and type(union) == "table" then
-        for guid in pairs(union) do
-            set[tonumber(guid) or guid] = true;
+    local ok, population = pcall(AreasRequest.Population, L, region);
+    if ok and type(population) == "table" then
+        for areaIdStr, products in pairs(population) do
+            local areaID = tonumber(areaIdStr) or areaIdStr;
+            for productGuid in pairs(products) do
+                local g = tonumber(productGuid) or productGuid;
+                if byArea[areaID] == nil then
+                    byArea[areaID] = {};
+                end
+                byArea[areaID][g] = true;
+                regionUnion[g] = true;
+            end
         end
     else
-        L.logf("[TRAtUI] 基本需求集合构建失败：%s", tostring(union));
+        L.logf("[TRAtUI] 基本需求集合构建失败：%s", tostring(population));
     end
 
+    -- 手工补充的 GUID 对全区生效（数据里认不出来的货物兜底）
     for _, guid in ipairs(TradePlannerLL.Policy.extraBasicGoods or {}) do
-        set[tonumber(guid) or guid] = true;
+        regionUnion[tonumber(guid) or guid] = true;
     end
-    return set;
+    return byArea, regionUnion;
+end
+
+--- 集合里有没有这个货物；键可能是 number 也可能是 string，两种都试。
+---@param set table|nil
+---@param productID number|string
+---@return boolean
+local function set_has(set, productID)
+    if type(set) ~= "table" then
+        return false;
+    end
+    if set[productID] == true then
+        return true;
+    end
+    return set[tostring(productID)] == true;
+end
+
+--- 某座岛的某种货物是否属于生活必需品（决定用 10 还是 50 的门槛）。
+---@param basicNeed table 形如 { ByArea = ..., Region = ... }
+---@param areaID AreaID
+---@param productID number
+---@return boolean
+function TradePlannerLL.IsBasicFor(basicNeed, areaID, productID)
+    if type(basicNeed) ~= "table" then
+        return false;
+    end
+    local p = TradePlannerLL.Policy;
+    for _, guid in ipairs(p.extraBasicGoods or {}) do
+        if (tonumber(guid) or guid) == productID then
+            return true;
+        end
+    end
+    local regionSet = basicNeed.Region or {};
+    if p.basicNeedScope == "region" then
+        return set_has(regionSet, productID);
+    end
+    -- areaID 在不同路径里可能是 number 也可能是 string，两种键都试一次
+    local byArea = basicNeed.ByArea or {};
+    local areaSet = byArea[areaID] or byArea[tostring(areaID)];
+    if areaSet ~= nil then
+        return set_has(areaSet, productID);
+    end
+    -- 该岛没识别到居民数据（纯生产岛 / 扫描缺失）：退回全区并集。
+    -- 保守方向 = 更容易判定为必需品，不会把本来在运的货突然卡回 50。
+    return set_has(regionSet, productID);
+end
+
+--- 把「哪座岛把哪些货当必需品」打进日志，方便和游戏里的需求面板逐项对照。
+--- 每个区域只打一次，避免刷屏。
+---@param L Logger
+---@param region RegionID
+---@param byArea table<AreaID, table<number, boolean>>
+local function log_basic_need_by_area(L, region, byArea)
+    TradePlannerLL.__Internal.loggedBasicNeed = TradePlannerLL.__Internal.loggedBasicNeed or {};
+    if TradePlannerLL.__Internal.loggedBasicNeed[region] then
+        return;
+    end
+    TradePlannerLL.__Internal.loggedBasicNeed[region] = true;
+
+    local scope = TradePlannerLL.Policy.basicNeedScope or "island";
+    if TradePlannerLL.Policy.basicNeedEnabled == false then
+        L.logf("[TRAtUI] 生活必需品：已关闭（全部按 %d 处理）", min_transfer_for(false));
+        return;
+    end
+    L.logf("[TRAtUI] 生活必需品阈值 %d / 其它 %d，判定粒度=%s",
+            min_transfer_for(true), min_transfer_for(false), tostring(scope));
+
+    for areaID, set in pairs(byArea) do
+        local names = {};
+        for productID in pairs(set) do
+            local p = AnnoInfo.Product(productID);
+            table.insert(names, p ~= nil and p.Name or tostring(productID));
+        end
+        table.sort(names);
+        local shown = #names;
+        if shown > 24 then
+            shown = 24;
+        end
+        local head = {};
+        for i = 1, shown do
+            head[i] = names[i];
+        end
+        L.logf("[TRAtUI]   岛 %s(id=%s)：必需品 %d 种 —— %s%s",
+                tostring(Anno.Area_CityName(region, areaID)), tostring(areaID), #names,
+                table.concat(head, ", "), #names > shown and " …" or "");
+    end
 end
 
 ---@generic K1, K2, V
@@ -199,8 +310,10 @@ end
 ---@return TradePlanner.SupplyRequestTable
 function TradePlannerLL.SupplyRequest_Build(L, region, _stockFromInFlight, areas)
     local areaToProductRequest = AreasRequest.All(L, region);
-    -- [v1.11.0] 生活必需品集合：这些货物的最小发运量会降到 Policy.minTransferBasic
-    local basicNeed = build_basic_need_set(L, region);
+    -- [v1.11.1] 生活必需品按「每座岛实际人口」判定；这些货物的最小发运量降到 minTransferBasic
+    local basicByArea, basicRegion = build_basic_need_by_area(L, region);
+    local basicNeed = { ByArea = basicByArea, Region = basicRegion };
+    log_basic_need_by_area(L, region, basicByArea);
     local allProducts = {};
     for areaID, products in pairs(areaToProductRequest) do
         for productID, _ in pairs(products) do
@@ -226,7 +339,8 @@ function TradePlannerLL.SupplyRequest_Build(L, region, _stockFromInFlight, areas
             local inFlightStock = inFlightStock_area[productID] or 0;
 
             -- [v1.11.0] 按货物类型选阈值：生活必需品 10，其它 50
-            local isBasic = basicNeed[productID] == true;
+            -- [v1.11.1] 必需品判定按「这座岛自己的居民」而不是全区并集
+            local isBasic = TradePlannerLL.IsBasicFor(basicNeed, areaID, productID);
             local MIN = min_transfer_for(isBasic);
 
             local _stock = Anno.Area_GetGood(region, areaID, productID);
@@ -363,7 +477,7 @@ function TradePlannerLL.SupplyRequest_Build(L, region, _stockFromInFlight, areas
             for productID, amount in pairs(goods) do
                 n = n + 1;
                 local p = AnnoInfo.Product(productID);
-                local basicMark = basicNeed[productID] and " [必需品]" or "";
+                local basicMark = TradePlannerLL.IsBasicFor(basicNeed, areaID, productID) and " [必需品]" or "";
                 L.logf("[TRAtUI] %s area=%d(%s) %s amount=%d%s", tag, areaID,
                         tostring(Anno.Area_CityName(region, areaID)),
                         p ~= nil and p.Name or tostring(productID), amount, basicMark);
@@ -399,8 +513,10 @@ function TradePlannerLL.SupplyRequest_BuildHubs(L, region, _stockFromInFlight, a
     end
 
     local areaToProductRequest = AreasRequest.All(L, region);
-    -- [v1.11.0] hub 路径同样按货物类型分阈值
-    local basicNeed = build_basic_need_set(L, region);
+    -- [v1.11.1] hub 路径同样是「每座岛实际人口」判定必需品
+    local basicByArea, basicRegion = build_basic_need_by_area(L, region);
+    local basicNeed = { ByArea = basicByArea, Region = basicRegion };
+    log_basic_need_by_area(L, region, basicByArea);
     local allProducts = {};
     for areaID, products in pairs(areaToProductRequest) do
         for productID, _ in pairs(products) do
@@ -421,7 +537,8 @@ function TradePlannerLL.SupplyRequest_BuildHubs(L, region, _stockFromInFlight, a
             local productName = product.Name;
 
             -- [v1.11.0] 按货物类型选阈值
-            local isBasic = basicNeed[productID] == true;
+            -- [v1.11.1] 按这座岛自己的居民判定
+            local isBasic = TradePlannerLL.IsBasicFor(basicNeed, areaID, productID);
             local MIN = min_transfer_for(isBasic);
 
             local inFlightStock = inFlightStock_area[productID] or 0;
@@ -499,13 +616,14 @@ function TradePlannerLL.SupplyRequest_ToOrders(
     local request_orders = {} -- table<orderKeyType, orderValueType>
 
     -- [v1.11.0] 生活必需品享受低阈值；带上这个标记，后面两道闸门才能同步放行
+    -- [v1.11.1] 判定看「目的岛」自己是否真的消耗这种货
     local basicNeed = supplyRequest.BasicNeed or {};
 
     local supply_gta = dict123to213(supplyRequest.Supply)
 
     for areaID, area_requests in pairs(supplyRequest.Request) do
         for goodID, amount in pairs(area_requests) do
-            local isBasic = basicNeed[goodID] == true;
+            local isBasic = TradePlannerLL.IsBasicFor(basicNeed, areaID, goodID);
             local MIN = min_transfer_for(isBasic);
             local supply_areas = supply_gta[goodID]
             if supply_areas == nil then
