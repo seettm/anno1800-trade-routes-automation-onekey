@@ -52,6 +52,104 @@ end
 
 TradePlannerHL.IsManagedShip = is_managed_ship;
 
+--- [v1.12.0] 航线名 → 舰队标签。只认 TRA_<region> 前缀，绝不误抓玩家的自有航线。
+---   TRA_OW    → "ALL"（原版单航线写法，继续兼容）
+---   TRA_OW_A  → "A"  （模板航线 1）
+---   TRA_OW_B  → "B"  （模板航线 2）
+---   TRA_OW_2  → "2"
+---@return string|nil
+local function parse_fleet(route_name, region)
+    if type(route_name) ~= "string" or type(region) ~= "string" then
+        return nil;
+    end
+    local prefix = "TRA_" .. region;
+    if string.sub(route_name, 1, #prefix) ~= prefix then
+        return nil;
+    end
+
+    local rest = string.sub(route_name, #prefix + 1);
+    if rest == "" then
+        return "ALL";
+    end
+
+    local tag = rest:match("^[_%-%s]?(%w)$");
+    if tag == nil then
+        -- TRA_OW 主舰队 / TRA_OW 运输队 这类自定义后缀，统一按单舰队处理
+        return "ALL";
+    end
+    return string.upper(tag);
+end
+
+TradePlannerHL.ParseFleet = parse_fleet;
+
+--- [v1.12.0] 把航线上的船同步进接管清单 —— 「两条模板航线」的落地方式。
+---
+--- 游戏没有开放用 Lua 创建航线的接口（原版作者 kr3v 也是让玩家手工建一条
+--- TRA_OW 假航线再挂船），所以这里不去创建航线，而是把航线当成玩家侧的容器：
+---   · 船拖进 TRA_OW_A / TRA_OW_B  → 下一轮迭代自动接管，不用 Shift+O
+---   · 船拖出航线                  → 自动释放，不再接单
+---   · 手动 Shift+O 接管的船        → manual=true，拖出航线也不会被释放
+---
+--- 只在真的发生变化时才写盘，避免每轮迭代都碰 IO。
+---@return number added, number released
+function TPHL_Internal.SyncRouteFleets(L, region)
+    local ships = Anno.Region_Ships_GetAll(region);
+    if type(ships) ~= "table" then
+        return 0, 0;
+    end
+
+    local added, released = 0, 0;
+    local seen = {};
+    for _, oid in pairs(ships) do
+        local route_name = nil;
+        local okRoute, rn = pcall(Anno.Ship_TradeRoute_GetName, oid);
+        if okRoute then
+            route_name = rn;
+        end
+        if type(route_name) == "string" and route_name ~= "" then
+            seen[route_name] = true;
+        end
+
+        local fleet = parse_fleet(route_name, region);
+        if fleet ~= nil then
+            local okAdopt, isNew = pcall(Companion.AdoptShip, oid, region, fleet, false);
+            if okAdopt and isNew then
+                added = added + 1;
+            end
+        else
+            local okRel, did = pcall(Companion.ReleaseIfAuto, oid);
+            if okRel and did then
+                released = released + 1;
+            end
+        end
+    end
+
+    -- 航线名打错是这套机制唯一容易踩的坑：名字不对就静默不纳管，
+    -- 玩家在游戏里看不出任何异常。这里把「实际看到的航线名」打一次，
+    -- 同一批名字只提示一次，避免每轮刷屏。
+    local names = {};
+    for name in pairs(seen) do
+        names[#names + 1] = name;
+    end
+    if #names > 0 then
+        table.sort(names);
+        local sig = table.concat(names, " | ");
+        if _G["trat_fork_route_hint"] ~= sig then
+            _G["trat_fork_route_hint"] = sig;
+            L.logf("[TRAtUI] 检测到航线：%s —— 只有 TRA_%s / TRA_%s_A / TRA_%s_B 会被纳管",
+                    sig, tostring(region), tostring(region), tostring(region));
+        end
+    end
+
+    if added > 0 or released > 0 then
+        L.logf("[TRAtUI] 航线舰队同步：纳管 %d 艘，释放 %d 艘（命名 TRA_%s_A / TRA_%s_B）",
+                added, released, tostring(region), tostring(region));
+        pcall(Companion.RefreshStatusNames);
+    end
+
+    return added, released;
+end
+
 function TPHL_Internal.Ships_RenameAll(L, region)
     -- [TRAtUI] 必须容忍 nil：非当前区域的船只列表来自磁盘缓存，
     -- 该区域还没扫过时取不到（Region_Ships_GetAll 返回 nil），
@@ -426,6 +524,16 @@ function TradePlannerHL.Loop(L, region, interrupt)
 
     L.logf("[TRAtUI] region=%s 缓存就绪，开始初始化调度", tostring(region));
 
+    -- [v1.12.0] 先把航线上的船纳管，再跑 RenameAll。
+    -- 顺序反了的话，RenameAll 会把航线船的船名改成 base62 短名（"1"/"2"），
+    -- 玩家自己起的名字白丢，紧接着又会被状态看板覆盖一次。
+    local okFleet, addedN, releasedN = pcall(TPHL_Internal.SyncRouteFleets, L, region);
+    if okFleet then
+        L.logf("[TRAtUI] 航线纳管：新增 %d 艘，释放 %d 艘", addedN or 0, releasedN or 0);
+    else
+        L.logf("[Error] SyncRouteFleets: %s", tostring(addedN));
+    end
+
     -- [TRAtUI] 开局这几步在 xpcall 之外，任何一处抛错都会让整个 region 循环永久死掉
     -- （表现：热键正常、日志有扫描记录、但船永远不动）。逐段隔离。
     local okRename, errRename = pcall(TradePlannerHL.__Internal.Ships_RenameAll, L, region);
@@ -567,6 +675,10 @@ function TradePlannerHL.Loop(L, region, interrupt)
                 coroutine.yield();
             end
         else
+            -- [v1.12.0] 每轮迭代前同步航线归属：玩家在游戏里把船拖进/拖出
+            -- TRA_OW_A / TRA_OW_B 不需要任何热键，下一轮就生效。
+            pcall(TPHL_Internal.SyncRouteFleets, Li, region);
+
             local success, err = xpcall(function()
                 return tradeExecutor_iteration(Li, areas, region);
             end, debug.traceback);

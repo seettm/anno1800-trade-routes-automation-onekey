@@ -251,6 +251,100 @@ function UI.IsManaged(oid)
     return list[tostring(oid)] ~= nil;
 end
 
+---------------------------------------------------------------------
+-- [v1.12.0] 航线舰队：把「挂在 TRA_<区域>[_A|_B] 航线上的船」自动纳入接管清单
+--
+-- 游戏没有开放「用 Lua 创建航线」的接口（原版作者 kr3v 也是让玩家手工建
+-- 一条 TRA_OW 假航线），所以这里不做创建，只做纳管：
+--   玩家把船拖进 TRA_OW_A / TRA_OW_B → 下一次调度迭代自动接管，无需 Shift+O
+--   玩家把船拖出航线            → 自动释放，不再接单
+--   手动 Shift+O 接管的船        → 标记 manual，拖出航线也不会被释放
+---------------------------------------------------------------------
+
+--- 舰队分布统计。
+---   A / B = 两条模板航线，ALL = 无后缀的单条航线（原版写法），M = 手动接管
+---@return table { A=number, B=number, ALL=number, M=number, total=number }
+function UI.FleetSummary()
+    local s = { A = 0, B = 0, ALL = 0, M = 0, total = 0 };
+    for _, v in pairs(UI.TakeOverList()) do
+        s.total = s.total + 1;
+        local fleet = (type(v) == "table") and v.fleet or nil;
+        if fleet == "A" or fleet == "B" then
+            s[fleet] = s[fleet] + 1;
+        elseif fleet == "ALL" then
+            s.ALL = s.ALL + 1;
+        elseif type(v) == "table" and v.manual then
+            s.M = s.M + 1;
+        else
+            -- 老版本清单（v1.11.x 及以前）没有 fleet 字段，按手动接管算
+            s.M = s.M + 1;
+        end
+    end
+    return s;
+end
+
+--- 把一艘航线船纳入接管清单。
+---@param oid number
+---@param region string
+---@param fleet string|nil "A" / "B" / "ALL"
+---@param manual boolean|nil 玩家手动接管（拖出航线也不释放）
+---@return boolean isNew 本次是否新增
+function UI.AdoptShip(oid, region, fleet, manual)
+    local list = UI.TakeOverList();
+    local key = tostring(oid);
+    local cur = list[key];
+
+    if type(cur) == "table" then
+        local dirty = false;
+        if fleet ~= nil and cur.fleet ~= fleet then
+            cur.fleet = fleet;
+            dirty = true;
+        end
+        if manual and not cur.manual then
+            cur.manual = true;
+            dirty = true;
+        end
+        if dirty then
+            save_takeover(list);
+        end
+        return false;
+    end
+
+    list[key] = {
+        region = region,
+        at = os.time(),
+        fleet = fleet,
+        manual = manual and true or false,
+    };
+    save_takeover(list);
+    return true;
+end
+
+--- 船已经不在 TRA_* 航线上时，把「由航线纳管进来」的那部分释放掉。
+---
+--- 关键保护：只动 fleet 不为空的条目。
+---   · 手动 Shift+O 接管的船（fleet=nil）→ 永远不会被航线同步误释放
+---   · v1.11.x 及更早写下的旧清单没有 fleet 字段 → 同样不动，
+---     否则玩家升级后会突然丢掉全部手动接管的船
+---@return boolean released
+function UI.ReleaseIfAuto(oid)
+    local list = UI.TakeOverList();
+    local key = tostring(oid);
+    local cur = list[key];
+    if type(cur) ~= "table" then
+        return false;
+    end
+    if cur.manual then
+        return false;
+    end
+    if cur.fleet == nil then
+        return false;
+    end
+    list[key] = nil;
+    save_takeover(list);
+    return true;
+end
+
 function UI.IsBusy()
     return _G[BUSY_KEY] == true;
 end
@@ -945,6 +1039,21 @@ local function compose_status_name()
     end
 
     local parts = { NAME_TAG_ON .. state, n .. "艘" };
+
+    -- [v1.12.0] 舰队分布：只有真的用了 A/B 航线才写进船名。
+    -- 纯手动接管的玩家看到的仍然是原来的 TRA_运行_2艘_平衡，不受这次改动影响。
+    local fleet = UI.FleetSummary();
+    if fleet.A > 0 or fleet.B > 0 then
+        local seg = {};
+        if fleet.A > 0 then
+            seg[#seg + 1] = "A" .. fleet.A;
+        end
+        if fleet.B > 0 then
+            seg[#seg + 1] = "B" .. fleet.B;
+        end
+        parts[#parts + 1] = table.concat(seg);
+    end
+
     if state == "运行" then
         local good, amount = top_demand();
         if good ~= nil then
@@ -1165,6 +1274,16 @@ function UI.Status()
             n, shipN,
             (good ~= nil) and string.format("%s %d", good, amount) or "无",
             namedChanged, namedTotal));
+
+    -- [v1.12.0] 舰队分布：只在真的用了航线时才多打一行，避免干扰手动接管用户。
+    local fleet = UI.FleetSummary();
+    if (fleet.A + fleet.B + fleet.ALL) > 0 then
+        say(string.format("舰队 航线A=%d艘 航线B=%d艘 无后缀航线=%d艘 手动接管=%d艘",
+                fleet.A, fleet.B, fleet.ALL, fleet.M));
+    else
+        say(string.format("舰队 未检测到搬运航线（在航线界面建一条名为 TRA_%s_A 的航线，把船拖进去即自动接管）",
+                tostring(region)));
+    end
 
     for _, line in ipairs(demand_lines(VIEW_MAX_GOODS)) do
         say(line);
