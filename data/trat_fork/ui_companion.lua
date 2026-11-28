@@ -284,23 +284,36 @@ end
 ---------------------------------------------------------------------
 
 --- 舰队分布统计。
----   A / B = 两条模板航线，ALL = 无后缀的单条航线（原版写法），M = 手动接管
----@return table { A=number, B=number, ALL=number, M=number, total=number }
+---   tags = 所有具体舰队（A / B / C / 01 …），按字母序排列，形如 {{tag="A",n=2},...}
+---   ALL  = 不带后缀的单条航线（原版写法），M = 手动接管（不在任何舰队里）
+--- [v1.12.3] 以前只有 A / B 两个桶，C 及之后的舰队会掉进 M 被误报成「手动接管」。
+--- 现在所有非空 fleet 标签都进 tags，A / B 字段保留给老调用方。
+---@return table { A=number, B=number, ALL=number, M=number, total=number, tags=table[] }
 function UI.FleetSummary()
-    local s = { A = 0, B = 0, ALL = 0, M = 0, total = 0 };
+    local s = { A = 0, B = 0, ALL = 0, M = 0, total = 0, tags = {} };
+    local byTag, order = {}, {};
     for _, v in pairs(UI.TakeOverList()) do
         s.total = s.total + 1;
         local fleet = (type(v) == "table") and v.fleet or nil;
-        if fleet == "A" or fleet == "B" then
-            s[fleet] = s[fleet] + 1;
+        if fleet == nil then
+            -- 手动 Shift+O 接管，以及 v1.11.x 之前的旧清单（没有 fleet 字段）
+            s.M = s.M + 1;
         elseif fleet == "ALL" then
             s.ALL = s.ALL + 1;
-        elseif type(v) == "table" and v.manual then
-            s.M = s.M + 1;
         else
-            -- 老版本清单（v1.11.x 及以前）没有 fleet 字段，按手动接管算
-            s.M = s.M + 1;
+            if byTag[fleet] == nil then
+                byTag[fleet] = 0;
+                order[#order + 1] = fleet;
+            end
+            byTag[fleet] = byTag[fleet] + 1;
+            if s[fleet] ~= nil then
+                s[fleet] = s[fleet] + 1;
+            end
         end
+    end
+    table.sort(order);
+    for _, tag in ipairs(order) do
+        s.tags[#s.tags + 1] = { tag = tag, n = byTag[tag] };
     end
     return s;
 end
@@ -308,7 +321,7 @@ end
 --- 把一艘航线船纳入接管清单。
 ---@param oid number
 ---@param region string
----@param fleet string|nil "A" / "B" / "ALL"
+---@param fleet string|nil 任意舰队标签（"A" / "B" / "01" / "FOOD" …），"ALL" = 无后缀航线
 ---@param manual boolean|nil 玩家手动接管（拖出航线也不释放）
 ---@return boolean isNew 本次是否新增
 function UI.AdoptShip(oid, region, fleet, manual)
@@ -963,6 +976,7 @@ end
 
 local VIEW_MAX_GOODS = 5;   -- Shift+K / 状态文件里最多列几种货
 local NAME_MAX_GOOD  = 8;   -- 船名里货物名的最大长度
+local MAX_FLEET_SEG  = 4;   -- 船名里最多列几个舰队（A2B2C1D1），其余用 +N 收尾
 
 --- GUID → 货物名。名字里必须去掉会打坏文本嵌入命令的字符（[ ] ( ) |）。
 ---@param maxLen number|nil 截断长度；nil = 不截断（明细用）
@@ -1060,16 +1074,18 @@ local function compose_status_name()
 
     local parts = { NAME_TAG_ON .. state, n .. "艘" };
 
-    -- [v1.12.0] 舰队分布：只有真的用了 A/B 航线才写进船名。
-    -- 纯手动接管的玩家看到的仍然是原来的 TRA_运行_2艘_平衡，不受这次改动影响。
+    -- [v1.12.3] 舰队分布：不再只认 A/B，任意舰队标签都按字母序拼进船名。
+    -- 船名有长度压力，最多写 MAX_FLEET_SEG 段，多出来的用 +N 收尾。
+    -- 纯手动接管的玩家（没有任何舰队）看到的仍然是原来的 TRA_运行_2艘_平衡。
     local fleet = UI.FleetSummary();
-    if fleet.A > 0 or fleet.B > 0 then
+    if #fleet.tags > 0 then
         local seg = {};
-        if fleet.A > 0 then
-            seg[#seg + 1] = "A" .. fleet.A;
-        end
-        if fleet.B > 0 then
-            seg[#seg + 1] = "B" .. fleet.B;
+        for i, t in ipairs(fleet.tags) do
+            if i > MAX_FLEET_SEG then
+                seg[#seg + 1] = "+" .. tostring(#fleet.tags - MAX_FLEET_SEG);
+                break;
+            end
+            seg[#seg + 1] = t.tag .. t.n;
         end
         parts[#parts + 1] = table.concat(seg);
     end
@@ -1295,11 +1311,17 @@ function UI.Status()
             (good ~= nil) and string.format("%s %d", good, amount) or "无",
             namedChanged, namedTotal));
 
-    -- [v1.12.0] 舰队分布：只在真的用了航线时才多打一行，避免干扰手动接管用户。
+    -- [v1.12.3] 舰队分布：任意数量的舰队都会列出来，不再只认 A/B。
     local fleet = UI.FleetSummary();
-    if (fleet.A + fleet.B + fleet.ALL) > 0 then
-        say(string.format("舰队 航线A=%d艘 航线B=%d艘 无后缀航线=%d艘 手动接管=%d艘",
-                fleet.A, fleet.B, fleet.ALL, fleet.M));
+    if #fleet.tags > 0 or fleet.ALL > 0 then
+        local seg = {};
+        for _, t in ipairs(fleet.tags) do
+            seg[#seg + 1] = string.format("%s=%d", t.tag, t.n);
+        end
+        if fleet.ALL > 0 then
+            seg[#seg + 1] = string.format("无后缀=%d", fleet.ALL);
+        end
+        say(string.format("舰队 %s艘｜手动接管=%d艘", table.concat(seg, " "), fleet.M));
 
         -- [v1.12.1] 空舱移动 = 航线 AI 在开，不是本 mod 派的单（我们派单时舱里一定有货）。
         -- 这是「挂了航线之后反而不搬运」的唯一成因，直接把船数和处置办法一起报出来。

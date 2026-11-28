@@ -52,11 +52,18 @@ end
 
 TradePlannerHL.IsManagedShip = is_managed_ship;
 
+--- [v1.12.3] 舰队标签最大长度。
+--- 单字符时代只能有 A-Z + 0-9 共 36 组，玩家想按「近岛/远岛/建材/食物」分组就不够用。
+--- 放到 4 位后标签空间是 36^1 + … + 36^4，实际瓶颈是游戏里航线列表的长度，不是这里。
+local MAX_FLEET_TAG = 4;
+
 --- [v1.12.0] 航线名 → 舰队标签。只认 TRA_<region> 前缀，绝不误抓玩家的自有航线。
----   TRA_OW    → "ALL"（原版单航线写法，继续兼容）
----   TRA_OW_A  → "A"  （模板航线 1）
----   TRA_OW_B  → "B"  （模板航线 2）
----   TRA_OW_2  → "2"
+---   TRA_OW      → "ALL"（原版单航线写法，继续兼容）
+---   TRA_OW_A    → "A"  （模板航线 1）
+---   TRA_OW_B    → "B"  （模板航线 2）
+---   TRA_OW_C    → "C"  （v1.12.3 起不再限制只有 A/B）
+---   TRA_OW_01   → "01" （v1.12.3：多字符标签，最多 4 位字母数字）
+---   TRA_OW 运输 → "ALL"（认不出的后缀按单舰队处理，仍然会被纳管）
 ---@return string|nil
 local function parse_fleet(route_name, region)
     if type(route_name) ~= "string" or type(region) ~= "string" then
@@ -72,8 +79,10 @@ local function parse_fleet(route_name, region)
         return "ALL";
     end
 
-    local tag = rest:match("^[_%-%s]?(%w)$");
-    if tag == nil then
+    -- 可带一个分隔符（_ - 空格），标签本身必须是纯字母数字：
+    -- 用字母数字而不是任意字符，是为了让船名里的 "A2B2" 不会被切成有歧义的段。
+    local tag = rest:match("^[_%-%s]?([%w]+)$");
+    if tag == nil or #tag > MAX_FLEET_TAG then
         -- TRA_OW 主舰队 / TRA_OW 运输队 这类自定义后缀，统一按单舰队处理
         return "ALL";
     end
