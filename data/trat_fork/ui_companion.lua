@@ -235,6 +235,28 @@ local function say(msg)
     end
 end
 
+-- [v1.12.2] 前缀定义与 strip_name_tag 上移到此处：航线纳管（UI.AdoptShip）
+-- 也需要「记下玩家原名」，而它是 local 函数，必须在调用点之前定义。
+-- 前缀里**绝不能出现方括号**：船名是作为参数嵌进文本嵌入命令串的
+-- （[MetaObjects ... Nameable Name(<船名>)]），而 `[` `]` 会被解析器当成
+-- 嵌套嵌入，直接把整条命令打坏、改名静默失败。同理避开 `(|)`。
+local NAME_TAG_ON    = "TRA_";
+local NAME_TAG_OFF   = "TRA-OFF_";
+local NAME_TAG_ALL   = { NAME_TAG_OFF, NAME_TAG_ON };  -- 长的在前，避免误剥
+
+--- 去掉可能已经存在的状态标记，拿到玩家原本的船名。
+local function strip_name_tag(name)
+    if type(name) ~= "string" then
+        return nil;
+    end
+    for _, tag in ipairs(NAME_TAG_ALL) do
+        if string.sub(name, 1, #tag) == tag then
+            return string.sub(name, #tag + 1);
+        end
+    end
+    return name;
+end
+
 ---@return table
 function UI.TakeOverList()
     local list = _G[TAKEOVER_KEY];
@@ -310,7 +332,16 @@ function UI.AdoptShip(oid, region, fleet, manual)
         return false;
     end
 
+    -- [v1.12.2] 记下玩家原名。手动接管一直有这一项，航线纳管以前没有，
+    -- 导致「拖出航线被自动释放」后船名永久残留成 TRA_运行_3艘_…。
+    -- 改名只在这里做一次，后续每轮同步走上面的分支、不会覆盖。
+    local originalName = nil;
+    pcall(function()
+        originalName = strip_name_tag(mods().Anno.Ship_Name_Get(oid));
+    end);
+
     list[key] = {
+        name = originalName,
         region = region,
         at = os.time(),
         fleet = fleet,
@@ -339,6 +370,12 @@ function UI.ReleaseIfAuto(oid)
     end
     if cur.fleet == nil then
         return false;
+    end
+    -- [v1.12.2] 还原玩家原名后再移除条目，否则船名会留下 TRA_运行_… 这类看板名。
+    local oidN = tonumber(key);
+    local restore = strip_name_tag(cur.name);
+    if oidN ~= nil and restore ~= nil and restore ~= "" then
+        pcall(function() mods().Anno.Ship_Name_Set(oidN, restore); end);
     end
     list[key] = nil;
     save_takeover(list);
@@ -692,25 +729,8 @@ end
 -- 释放时会精确还原成玩家原本的船名。
 ---------------------------------------------------------------------
 
--- 前缀里**绝不能出现方括号**：船名是作为参数嵌进文本嵌入命令串的
--- （[MetaObjects ... Nameable Name(<船名>)]），而 `[` `]` 会被解析器当成
--- 嵌套嵌入，直接把整条命令打坏、改名静默失败。同理避开 `(|)`。
-local NAME_TAG_ON    = "TRA_";
-local NAME_TAG_OFF   = "TRA-OFF_";
-local NAME_TAG_ALL   = { NAME_TAG_OFF, NAME_TAG_ON };  -- 长的在前，避免误剥
-
---- 去掉可能已经存在的状态标记，拿到玩家原本的船名。
-local function strip_name_tag(name)
-    if type(name) ~= "string" then
-        return nil;
-    end
-    for _, tag in ipairs(NAME_TAG_ALL) do
-        if string.sub(name, 1, #tag) == tag then
-            return string.sub(name, #tag + 1);
-        end
-    end
-    return name;
-end
+-- 前缀（NAME_TAG_ON / NAME_TAG_OFF / strip_name_tag）已上移到文件前部，
+-- 见 UI.TakeOverList 之前 —— 航线纳管 UI.AdoptShip 也要用它们记玩家原名。
 
 --- 给一艘船打上状态标记（保留原名）。默认开启，可用 _G["trat_fork_name_tag"]=false 关掉。
 local function apply_name_tag(M, oid, originalName, enabled)
