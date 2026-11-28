@@ -58,6 +58,13 @@ TradePlannerLL.Policy = {
     -- 额外视为「基本需求」的货物 GUID（数据里认不出来的可手工补，全区生效）
     -- 默认空；例如想强制把木材算进去就加 120008
     extraBasicGoods = {},
+    -- [v1.12.4] 舰队职责：航线名写成 C1 / R1 / B1 时，该舰队的船只运对应类别的货。
+    --   C* = 居民消费品（鱼、面包、啤酒、衣服…）
+    --   R* = 加工原料（谷物、羊毛、铁矿、原木…）
+    --   B* = 建造材料（木材、木板、砖、钢梁、窗户…）
+    -- 其它标签（A / B / 01 / FOOD …）不限职责，行为与旧版完全一致。
+    -- false = 关闭职责过滤，所有舰队回到「什么都运」
+    fleetRolesEnabled = true,
 };
 
 --- 某种货物本次允许的最小发运量。
@@ -69,6 +76,74 @@ local function min_transfer_for(isBasic)
         return p.minTransferBasic or 10;
     end
     return p.minTransferNormal or 50;
+end
+
+--- [v1.12.4] 货物 → 职责类别（C / R / B），region 级只算一次。
+---
+--- 分类完全来自游戏内数据，不写死货物 GUID：
+---   B = 建造材料（AreaRequests.Construction 的清单）
+---   R = 加工原料（本区域真实建成的工厂所消耗的货）
+---   C = 居民消费品（residence_info 的 Request 并集）
+---
+--- 一个货可以同时属于多类（木材既是建材又被锯木厂当原料），存成
+--- `{ C=true }` 这样的位集合而不是单一字符串。理由：如果只留一类，
+--- 木材会被归进 R，B1 舰队就永远运不了木材，而玩家往往就是这么想的。
+--- 多类归属 = 两支舰队都能运，谁近谁去，绝不会出现「有货没人运」。
+---@param L Logger
+---@param region RegionID
+---@return table<number, table<string, boolean>> class goodID -> { C?, R?, B? }
+local function build_good_class(L, region)
+    local class = {};
+    if TradePlannerLL.Policy.fleetRolesEnabled == false then
+        return class;
+    end
+
+    local function mark(guid, code)
+        local gid = tonumber(guid) or guid;
+        local set = class[gid];
+        if set == nil then
+            set = {};
+            class[gid] = set;
+        end
+        set[code] = true;
+    end
+
+    local okB, buildSet = pcall(AreasRequest.Construction, L, region);
+    if okB and type(buildSet) == "table" then
+        for _, goods in pairs(buildSet) do
+            for guid in pairs(goods) do
+                mark(guid, "B");
+            end
+        end
+    end
+
+    local okR, rawSet = pcall(AreasRequest.ProductionInputs_Set, L, region);
+    if okR and type(rawSet) == "table" then
+        for guid in pairs(rawSet) do
+            mark(guid, "R");
+        end
+    end
+
+    local okC, consumerSet = pcall(AreasRequest.Population_Union, L, region);
+    if okC and type(consumerSet) == "table" then
+        for guid in pairs(consumerSet) do
+            mark(guid, "C");
+        end
+    end
+
+    local counts = { C = 0, R = 0, B = 0 };
+    local total = 0;
+    for _, set in pairs(class) do
+        total = total + 1;
+        for code in pairs(set) do
+            counts[code] = (counts[code] or 0) + 1;
+        end
+    end
+    L.logf("[TRAtUI] 舰队职责分类：共 %d 种货 —— 消费品 C=%d 种，原料 R=%d 种，建材 B=%d 种"
+            .. "（重叠的货两边都能运；航线名 C1/R1/B1 生效，其它标签不限职责）",
+            total, counts.C, counts.R, counts.B);
+
+    return class;
 end
 
 --- 构建「生活必需品」集合。
@@ -509,6 +584,9 @@ function TradePlannerLL.SupplyRequest_Build(L, region, _stockFromInFlight, areas
     -- [v1.11.0] 下游（订单生成 / 派船 / 执行）需要知道哪些货物享受低阈值，
     -- 否则这里放行了、后面几道 50 的闸门又会把它拦回去。
     ret.BasicNeed = basicNeed;
+    -- [v1.12.4] 舰队职责用的货物分类，订单生成时挂到 order 上，
+    -- 派船时按「舰队角色 vs 货物类别」过滤。
+    ret.GoodClass = build_good_class(L, region);
 
     -- [TRAtUI] 供需摘要：判断「船为什么不动」最直接的证据。
     -- 之前每轮都在上面崩掉，玩家只看到一行报错；现在把结果摊开，
@@ -647,6 +725,7 @@ function TradePlannerLL.SupplyRequest_BuildHubs(L, region, _stockFromInFlight, a
     ret.Supply = supply;
     ret.Request = request;
     ret.BasicNeed = basicNeed;
+    ret.GoodClass = build_good_class(L, region);
     return ret;
 end
 
@@ -664,6 +743,8 @@ function TradePlannerLL.SupplyRequest_ToOrders(
     -- [v1.11.0] 生活必需品享受低阈值；带上这个标记，后面两道闸门才能同步放行
     -- [v1.11.1] 判定看「目的岛」自己是否真的消耗这种货
     local basicNeed = supplyRequest.BasicNeed or {};
+    -- [v1.12.4] 货物类别（C/R/B），派船时用来匹配舰队职责
+    local goodClass = supplyRequest.GoodClass or {};
 
     local supply_gta = dict123to213(supplyRequest.Supply)
 
@@ -702,6 +783,8 @@ function TradePlannerLL.SupplyRequest_ToOrders(
                         RequestAmount = amount,
                         SupplyAmount = supply_amount,
                         IsBasic = isBasic,
+                        ---@type table|nil { C?, R?, B? }
+                        GoodsClass = goodClass[goodID],
                     }
                     local value = {
                         OrderDistance = distance,
@@ -730,6 +813,11 @@ function TradePlannerLL.SupplyRequestOrders_ToShipCommands(
     ---@type TradePlanner.Commands
     local available_commands = {}
 
+    -- [v1.12.4] 舰队职责：oid -> "C" / "R" / "B"，由 hl 层每轮根据航线名刷新。
+    -- 没有条目的船 = 不限职责（旧行为），所以未使用 C1/R1/B1 的存档完全不受影响。
+    local shipRoles = _G["trat_fork_ship_roles"] or {};
+    local roleBlocked = 0;
+
     for ship, _ in pairs(available_ships) do
         local slots_cap = Anno.Ship_Cargo_SlotCapacity(ship);
         local cap = slots_cap * 50;
@@ -740,6 +828,19 @@ function TradePlannerLL.SupplyRequestOrders_ToShipCommands(
         end
 
         for order_key, order_value in pairs(request_orders) do
+            -- [v1.12.4] 舰队职责过滤：C1 只运消费品、R1 只运原料、B1 只运建材。
+            -- 不匹配就跳过这单，留给别的舰队；全部舰队都不匹配时该缺口会一直存在，
+            -- 由下面的汇总日志提示玩家「不是没货，是没有对应职责的船」。
+            -- 货物没有分类信息（分类失败 / 职责功能关闭）时一律放行，方向是安全的。
+            local shipRole = shipRoles[ship];
+            if shipRole ~= nil then
+                local cls = order_key.GoodsClass;
+                if type(cls) == "table" and cls[shipRole] ~= true then
+                    roleBlocked = roleBlocked + 1;
+                    goto continue;
+                end
+            end
+
             local ship_position = order_value.OrderDistance.src
 
             local info = TradeExecutor.Ship_Name_FetchCmdInfo(ship)
@@ -793,6 +894,17 @@ function TradePlannerLL.SupplyRequestOrders_ToShipCommands(
     table.sort(available_commands, function(a, b)
         return a.Value.ShipDistance < b.Value.ShipDistance
     end);
+
+    -- [v1.12.4] 被职责过滤掉多少组合：只在数字变化时打一行，避免每轮刷屏。
+    -- 这条是「明明有货、有船，却没人接」的唯一解释，缺了它玩家会以为又卡住了。
+    if roleBlocked > 0 and _G["trat_fork_role_blocked_n"] ~= roleBlocked then
+        _G["trat_fork_role_blocked_n"] = roleBlocked;
+        L.logf("[TRAtUI] 有 %d 个「船×订单」组合被舰队职责过滤（C=消费品 R=原料 B=建材）。"
+                .. "如果缺口长期不动，检查是否缺少对应职责的舰队（例如没有 R1 就没人运原料）。",
+                roleBlocked);
+    elseif roleBlocked == 0 then
+        _G["trat_fork_role_blocked_n"] = 0;
+    end
 
     return available_commands;
 end

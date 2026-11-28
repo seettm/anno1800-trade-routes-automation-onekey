@@ -1311,6 +1311,17 @@ function UI.Status()
             (good ~= nil) and string.format("%s %d", good, amount) or "无",
             namedChanged, namedTotal));
 
+    -- [v1.12.4] 舰队职责：只有真的用了 C1/R1/B1 这种命名才打，避免干扰普通玩家。
+    local roleCount, roleByCode = 0, { C = 0, R = 0, B = 0 };
+    for _, role in pairs(_G["trat_fork_ship_roles"] or {}) do
+        roleCount = roleCount + 1;
+        roleByCode[role] = (roleByCode[role] or 0) + 1;
+    end
+    if roleCount > 0 then
+        say(string.format("舰队职责 %d 艘：C=消费品 %d 艘，R=原料 %d 艘，B=建材 %d 艘（改航线名 C1/R1/B1 立即生效）",
+                roleCount, roleByCode.C or 0, roleByCode.R or 0, roleByCode.B or 0));
+    end
+
     -- [v1.12.3] 舰队分布：任意数量的舰队都会列出来，不再只认 A/B。
     local fleet = UI.FleetSummary();
     if #fleet.tags > 0 or fleet.ALL > 0 then

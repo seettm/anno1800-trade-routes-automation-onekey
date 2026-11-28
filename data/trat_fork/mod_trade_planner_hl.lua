@@ -91,6 +91,43 @@ end
 
 TradePlannerHL.ParseFleet = parse_fleet;
 
+--- [v1.12.4] 舰队标签 → 职责码。
+--- 只有「一个字母 C/R/B + 数字」才算职责，例如 C1 / R2 / B1：
+---   C* 只运居民消费品，R* 只运加工原料，B* 只运建造材料
+--- 其它标签（A / B / 01 / FOOD …）一律不限职责，与旧版行为完全一致。
+--- 之所以要求后面必须跟数字，是为了避免旧的 TRA_OW_B 被突然解读成「只运建材」。
+---@param tag string|nil
+---@return string|nil "C" | "R" | "B"
+local function fleet_role(tag)
+    if type(tag) ~= "string" then
+        return nil;
+    end
+    return tag:match("^([CRB])%d+$");
+end
+
+TradePlannerHL.FleetRole = fleet_role;
+
+--- [v1.12.4] 把每艘船的职责发布到 _G，供 planner_ll 派单时过滤。
+--- 清单里任何船没有舰队标签（手动接管）→ 不写条目 = 不限职责。
+---@return table<number, string> roles, number named
+function TPHL_Internal.PublishShipRoles()
+    local roles, named = {}, 0;
+    local okList, list = pcall(Companion.TakeOverList);
+    if okList and type(list) == "table" then
+        for k, v in pairs(list) do
+            local oid = tonumber(k);
+            local tag = (type(v) == "table") and v.fleet or nil;
+            local role = fleet_role(tag);
+            if oid ~= nil and role ~= nil then
+                roles[oid] = role;
+                named = named + 1;
+            end
+        end
+    end
+    _G["trat_fork_ship_roles"] = roles;
+    return roles, named;
+end
+
 --- [v1.12.0] 把航线上的船同步进接管清单 —— 「两条模板航线」的落地方式。
 ---
 --- 游戏没有开放用 Lua 创建航线的接口（原版作者 kr3v 也是让玩家手工建一条
@@ -154,6 +191,25 @@ function TPHL_Internal.SyncRouteFleets(L, region)
         L.logf("[TRAtUI] 航线舰队同步：纳管 %d 艘，释放 %d 艘（命名 TRA_%s_A / TRA_%s_B）",
                 added, released, tostring(region), tostring(region));
         pcall(Companion.RefreshStatusNames);
+    end
+
+    -- [v1.12.4] 职责表跟着舰队一起刷新。有玩家在游戏里改了航线名（A → R1），
+    -- 不需要重启，下一轮同步就会按新职责派单。
+    local okRoles, roles, named = pcall(TPHL_Internal.PublishShipRoles);
+    if okRoles and named > 0 then
+        local sig = {};
+        for oid, role in pairs(roles) do
+            sig[#sig + 1] = tostring(oid) .. "=" .. role;
+        end
+        table.sort(sig);
+        local joined = table.concat(sig, ",");
+        if _G["trat_fork_role_hint"] ~= joined then
+            _G["trat_fork_role_hint"] = joined;
+            L.logf("[TRAtUI] 舰队职责：%d 艘船受限制（%s）— C=消费品 R=原料 B=建材",
+                    named, joined);
+        end
+    elseif okRoles then
+        _G["trat_fork_role_hint"] = nil;
     end
 
     return added, released;
